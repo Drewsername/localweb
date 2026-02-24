@@ -4,6 +4,7 @@ import Welcome from "./pages/Welcome";
 import Home from "./pages/Home";
 import Lights from "./pages/Lights";
 import Display from "./pages/Display";
+import Thermostat from "./pages/Thermostat";
 import Admin from "./pages/Admin";
 
 function AppRoutes() {
@@ -23,6 +24,7 @@ function AppRoutes() {
       <Route path="/home" element={user ? <Home /> : <Navigate to="/" />} />
       <Route path="/lights" element={user ? <Lights /> : <Navigate to="/" />} />
       <Route path="/display" element={user ? <Display /> : <Navigate to="/" />} />
+      <Route path="/thermostat" element={user ? <Thermostat /> : <Navigate to="/" />} />
       <Route path="/admin" element={user?.isAdmin ? <Admin /> : <Navigate to="/" />} />
     </Routes>
   );

@@ -14,6 +14,12 @@ const apps = [
     path: "/display",
     icon: "\u{1F5BC}\u{FE0F}",
   },
+  {
+    name: "Thermostat",
+    description: "Nest climate control",
+    path: "/thermostat",
+    icon: "\u{1F321}\u{FE0F}",
+  },
 ];
 
 export default function Home() {
