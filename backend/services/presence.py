@@ -7,8 +7,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from db import get_db
 
-SCAN_INTERVAL = 30  # seconds
-DEPARTURE_THRESHOLD = 300  # 5 minutes
+SCAN_INTERVAL = 5  # seconds — lightweight, runs often
+DEPARTURE_THRESHOLD = 15  # seconds — 3 missed scans = gone
 WELCOME_DURATION = 60  # seconds before switching to dashboard
 
 
@@ -39,21 +39,63 @@ class PresenceScanner:
                 print(f"Presence scan error: {e}")
             time.sleep(SCAN_INTERVAL)
 
-    def _get_network_macs(self):
-        """Parse ARP table for all MAC addresses on the local network."""
+    def _ping_users(self, users):
+        """Ping all known user IPs to force ARP table refresh.
+
+        Without this, disconnected devices stay STALE in the ARP table
+        for minutes. A failed ping makes the entry go to FAILED state,
+        which we then filter out.
+        """
+        is_windows = platform.system() == "Windows"
+        for user in users:
+            ip = user["ip_address"]
+            if not ip:
+                continue
+            try:
+                if is_windows:
+                    subprocess.run(
+                        ["ping", "-n", "1", "-w", "500", ip],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=2,
+                    )
+                else:
+                    subprocess.run(
+                        ["ping", "-c", "1", "-W", "1", ip],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=2,
+                    )
+            except Exception:
+                pass
+
+    def _get_reachable_macs(self):
+        """Get MAC addresses that are actually reachable on the network.
+
+        On Linux, filters out FAILED entries from `ip neigh` so we only
+        count devices that responded to recent pings.
+        """
         macs = set()
         try:
             if platform.system() == "Windows":
                 output = subprocess.check_output(["arp", "-a"], text=True)
+                for line in output.splitlines():
+                    match = re.search(
+                        r"([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", line
+                    )
+                    if match:
+                        macs.add(match.group(0).lower().replace("-", ":"))
             else:
                 output = subprocess.check_output(["ip", "neigh"], text=True)
-
-            for line in output.splitlines():
-                match = re.search(
-                    r"([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", line
-                )
-                if match:
-                    macs.add(match.group(0).lower().replace("-", ":"))
+                for line in output.splitlines():
+                    # Skip entries that are FAILED (device not responding)
+                    if "FAILED" in line:
+                        continue
+                    match = re.search(
+                        r"([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", line
+                    )
+                    if match:
+                        macs.add(match.group(0).lower().replace("-", ":"))
         except Exception as e:
             print(f"ARP scan failed: {e}")
         return macs
@@ -88,13 +130,19 @@ class PresenceScanner:
             db.close()
 
     def _scan(self):
-        network_macs = self._get_network_macs()
-        now = datetime.now(timezone.utc)
-        departure_cutoff = now - timedelta(seconds=DEPARTURE_THRESHOLD)
-
         db = get_db()
         try:
-            users = db.execute("SELECT id, name, mac_address, is_home FROM users").fetchall()
+            users = db.execute(
+                "SELECT id, name, mac_address, ip_address, is_home FROM users"
+            ).fetchall()
+
+            # Ping all known IPs to refresh ARP entries
+            self._ping_users(users)
+
+            # Now read the ARP table — stale/failed entries are filtered
+            network_macs = self._get_reachable_macs()
+            now = datetime.now(timezone.utc)
+            departure_cutoff = now - timedelta(seconds=DEPARTURE_THRESHOLD)
 
             newly_arrived = []
             someone_departed = False
