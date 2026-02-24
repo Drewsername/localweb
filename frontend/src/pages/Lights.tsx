@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 
 interface DeviceCapability {
@@ -60,19 +60,29 @@ export default function Lights() {
     fetchDevices();
   }, [fetchDevices]);
 
+  function updateLocalState(deviceId: string, instance: string, value: unknown) {
+    setStates((prev) => {
+      const existing = prev[deviceId]?.capabilities ?? [];
+      const idx = existing.findIndex((c) => c.instance === instance);
+      const updated = [...existing];
+      if (idx >= 0) {
+        updated[idx] = { ...updated[idx], state: { value } };
+      } else {
+        updated.push({ type: "", instance, state: { value } });
+      }
+      return { ...prev, [deviceId]: { capabilities: updated } };
+    });
+  }
+
   async function sendControl(deviceId: string, capability: Record<string, unknown>) {
+    // Optimistic: update UI immediately
+    updateLocalState(deviceId, capability.instance as string, capability.value);
     try {
       await fetch(`/api/govee/devices/${encodeURIComponent(deviceId)}/control`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ capability }),
       });
-      // Refresh state after control
-      const sr = await fetch(`/api/govee/devices/${encodeURIComponent(deviceId)}/state`);
-      if (sr.ok) {
-        const sd = await sr.json();
-        setStates((prev) => ({ ...prev, [deviceId]: sd }));
-      }
     } catch (err) {
       console.error("Control failed:", err);
     }
@@ -138,6 +148,23 @@ function DeviceCard({
   const colorInt = (getStateValue("colorRgb") as number) ?? 16777215;
   const colorHex = "#" + colorInt.toString(16).padStart(6, "0");
 
+  // Local state for slider/color so dragging feels instant
+  const [localBrightness, setLocalBrightness] = useState(brightness);
+  const [draggingBrightness, setDraggingBrightness] = useState(false);
+  const [localColor, setLocalColor] = useState(colorHex);
+  const [pickingColor, setPickingColor] = useState(false);
+  const brightnessTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const colorTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Sync from server state when not actively interacting
+  useEffect(() => {
+    if (!draggingBrightness) setLocalBrightness(brightness);
+  }, [brightness, draggingBrightness]);
+
+  useEffect(() => {
+    if (!pickingColor) setLocalColor(colorHex);
+  }, [colorHex, pickingColor]);
+
   return (
     <div className="p-5 bg-gray-900 border border-gray-800 rounded-xl space-y-4">
       <div className="flex items-center justify-between">
@@ -166,19 +193,26 @@ function DeviceCard({
 
       {hasBrightness && (
         <div className="space-y-1">
-          <label className="text-sm text-gray-400">Brightness: {brightness}%</label>
+          <label className="text-sm text-gray-400">Brightness: {localBrightness}%</label>
           <input
             type="range"
             min={1}
             max={100}
-            value={brightness}
-            onChange={(e) =>
-              onControl({
-                type: "devices.capabilities.range",
-                instance: "brightness",
-                value: Number(e.target.value),
-              })
-            }
+            value={localBrightness}
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              setLocalBrightness(val);
+              setDraggingBrightness(true);
+              clearTimeout(brightnessTimer.current);
+              brightnessTimer.current = setTimeout(() => {
+                onControl({
+                  type: "devices.capabilities.range",
+                  instance: "brightness",
+                  value: val,
+                });
+                setDraggingBrightness(false);
+              }, 300);
+            }}
             className="w-full accent-red-600"
           />
         </div>
@@ -189,14 +223,20 @@ function DeviceCard({
           <label className="text-sm text-gray-400">Color</label>
           <input
             type="color"
-            value={colorHex}
+            value={localColor}
             onChange={(e) => {
-              const rgb = parseInt(e.target.value.slice(1), 16);
-              onControl({
-                type: "devices.capabilities.color_setting",
-                instance: "colorRgb",
-                value: rgb,
-              });
+              setLocalColor(e.target.value);
+              setPickingColor(true);
+              clearTimeout(colorTimer.current);
+              colorTimer.current = setTimeout(() => {
+                const rgb = parseInt(e.target.value.slice(1), 16);
+                onControl({
+                  type: "devices.capabilities.color_setting",
+                  instance: "colorRgb",
+                  value: rgb,
+                });
+                setPickingColor(false);
+              }, 300);
             }}
             className="w-full h-10 rounded-lg border border-gray-700 bg-gray-800 cursor-pointer"
           />
