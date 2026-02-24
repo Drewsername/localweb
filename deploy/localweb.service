@@ -1,0 +1,15 @@
+[Unit]
+Description=localweb home control system
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/localweb/backend
+Environment=PATH=/home/pi/localweb/backend/venv/bin:/usr/bin:/bin
+ExecStart=/home/pi/localweb/backend/venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
