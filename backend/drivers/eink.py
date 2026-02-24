@@ -190,14 +190,16 @@ def render_hello():
 
 def image_to_png(img):
     """Convert a palette-mode display image to PNG bytes."""
-    rgb = Image.new("RGB", img.size, (255, 255, 255))
+    cmap = DARK_COLOR_MAP if dark_mode else COLOR_MAP
+    bg = cmap[WHITE]
+    rgb = Image.new("RGB", img.size, bg)
     pixels = img.load()
     rgb_pixels = rgb.load()
     for y in range(img.height):
         for x in range(img.width):
             p = pixels[x, y]
-            if p in COLOR_MAP:
-                rgb_pixels[x, y] = COLOR_MAP[p]
+            if p in cmap:
+                rgb_pixels[x, y] = cmap[p]
     buf = io.BytesIO()
     rgb.save(buf, format="PNG")
     return buf.getvalue()
@@ -208,6 +210,26 @@ def image_to_png(img):
 # ---------------------------------------------------------------------------
 
 current_img = None
+dark_mode = False
+
+# Dark mode color map: swap white/black, keep red
+DARK_COLOR_MAP = {
+    WHITE: (0, 0, 0),
+    BLACK: (255, 255, 255),
+    RED: (200, 0, 0),
+}
+
+# Lookup table to swap palette indices 0 (white) and 1 (black)
+_DARK_LUT = [1, 0] + list(range(2, 256))
+
+
+def set_dark_mode(enabled):
+    global dark_mode
+    dark_mode = bool(enabled)
+
+
+def is_dark_mode():
+    return dark_mode
 
 
 def set_current(img):
@@ -237,11 +259,12 @@ class InkyHandler:
 
     def _show(self, img):
         set_current(img)
-        img_bytes = img.tobytes()
+        display_img = img.point(_DARK_LUT) if dark_mode else img
+        img_bytes = display_img.tobytes()
         if img_bytes == self._last_bytes:
             return
         self._last_bytes = img_bytes
-        rotated = img.rotate(180)
+        rotated = display_img.rotate(180)
         self.inky_display.set_image(rotated)
         self.inky_display.show()
 

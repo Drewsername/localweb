@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 from db import init_db
 
@@ -53,6 +53,23 @@ def eink_hello():
 def display_image():
     from drivers.eink import get_display_png
     return Response(get_display_png(), mimetype="image/png")
+
+
+@app.get("/api/display/dark-mode")
+def get_dark_mode():
+    from drivers.eink import is_dark_mode
+    return jsonify({"enabled": is_dark_mode()})
+
+
+@app.post("/api/display/dark-mode")
+def set_display_dark_mode():
+    from drivers.eink import set_dark_mode, is_dark_mode, current_img
+    data = request.get_json()
+    set_dark_mode(data.get("enabled", False))
+    # Re-push to hardware with new color mode
+    if eink and current_img:
+        eink.show_image(current_img)
+    return jsonify({"enabled": is_dark_mode()})
 
 
 @app.get("/")
