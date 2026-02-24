@@ -16,9 +16,10 @@ REWELCOME_COOLDOWN = 300  # seconds — don't re-welcome same user within 5 min
 
 
 class PresenceScanner:
-    def __init__(self, eink=None, govee=None):
+    def __init__(self, eink=None, govee=None, nest=None):
         self.eink = eink
         self.govee = govee
+        self.nest = nest
         self._thread = None
         self._running = False
         self._welcome_timer = None
@@ -250,3 +251,53 @@ class PresenceScanner:
                     self.govee.apply_user_settings(settings)
             except Exception as e:
                 print(f"Failed to apply settings for {name}: {e}")
+
+        # Apply optimal Nest temperature based on all home users
+        if self.nest:
+            try:
+                from services.thermostat_optimizer import compute_optimal_temp
+
+                # Get all home users' preferences
+                home_users = db.execute("""
+                    SELECT u.id, us.value
+                    FROM users u
+                    JOIN user_settings us ON us.user_id = u.id
+                        AND us.namespace = 'nest.preferences'
+                        AND us.key = 'preferred_temp'
+                    WHERE u.is_home = 1
+                """).fetchall()
+
+                # Get admin guardrails
+                admin = db.execute("SELECT id FROM users WHERE LOWER(name) = 'drew'").fetchone()
+                guardrails = {"min_temp": 65, "max_temp": 78}
+                if admin:
+                    for key in ("min_temp", "max_temp"):
+                        row = db.execute(
+                            "SELECT value FROM user_settings WHERE user_id = ? AND namespace = 'nest.admin' AND key = ?",
+                            (admin["id"], key),
+                        ).fetchone()
+                        if row:
+                            guardrails[key] = json.loads(row["value"])
+
+                # Build user list with weights
+                users = []
+                for r in home_users:
+                    weight = 1.0
+                    if admin:
+                        w_row = db.execute(
+                            "SELECT value FROM user_settings WHERE user_id = ? AND namespace = 'nest.admin' AND key = ?",
+                            (admin["id"], f"user_weight.{r['id']}"),
+                        ).fetchone()
+                        if w_row:
+                            weight = json.loads(w_row["value"])
+                    users.append({"preferred_temp": json.loads(r["value"]), "weight": weight})
+
+                if users:
+                    optimal = compute_optimal_temp(users, **guardrails)
+                    if optimal is not None:
+                        devices = self.nest.get_devices()
+                        for d in devices:
+                            self.nest.set_temperature(d["id"], optimal)
+                        print(f"Set Nest to {optimal}F (optimal for {len(users)} home users)")
+            except Exception as e:
+                print(f"Failed to apply Nest settings: {e}")
