@@ -28,7 +28,6 @@ if os.environ.get("LOCALWEB_ENV") != "dev":
     try:
         from drivers.eink import InkyHandler
         eink = InkyHandler()
-        eink.idle()  # Show default screen on startup
     except Exception as e:
         print(f"E-ink not available: {e}")
 
@@ -62,7 +61,28 @@ def fallback(e):
     return send_from_directory(app.static_folder, "index.html")
 
 
+def _show_current_home_user():
+    """On startup, show the most recently seen home user on the e-ink display."""
+    from db import get_db
+    db = get_db()
+    try:
+        user = db.execute(
+            "SELECT name FROM users WHERE is_home = 1 ORDER BY last_seen DESC LIMIT 1"
+        ).fetchone()
+        if user:
+            if eink:
+                eink.welcome(user["name"])
+            else:
+                from drivers.eink import render_welcome, set_current
+                set_current(render_welcome(user["name"]))
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
+    # Show welcome for whoever is already home
+    _show_current_home_user()
+
     # Start presence scanner
     from services.presence import PresenceScanner
     from routes.govee import govee
