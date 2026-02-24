@@ -212,15 +212,15 @@ def image_to_png(img):
 current_img = None
 dark_mode = False
 
-# Dark mode color map: swap white/black, keep red
+# Dark mode color map: black bg, everything else white (red doesn't pop)
 DARK_COLOR_MAP = {
     WHITE: (0, 0, 0),
     BLACK: (255, 255, 255),
-    RED: (200, 0, 0),
+    RED: (255, 255, 255),
 }
 
-# Lookup table to swap palette indices 0 (white) and 1 (black)
-_DARK_LUT = [1, 0] + list(range(2, 256))
+# Lookup table: map WHITE→BLACK, BLACK→WHITE, RED→WHITE (index 2→1)
+_DARK_LUT = [1, 0, 1] + list(range(3, 256))
 
 
 def set_dark_mode(enabled):

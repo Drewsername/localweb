@@ -33,6 +33,7 @@ export default function Display() {
 
   function toggleDarkMode() {
     const next = !darkMode;
+    setDarkMode(next);
     fetch("/api/display/dark-mode", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -43,7 +44,7 @@ export default function Display() {
         setDarkMode(data.enabled);
         refresh();
       })
-      .catch(() => {});
+      .catch(() => setDarkMode(!next));
   }
 
   return (
