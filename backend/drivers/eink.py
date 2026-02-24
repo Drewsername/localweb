@@ -1,6 +1,7 @@
 import io
 import os
 from PIL import Image, ImageFont, ImageDraw
+import qrcode
 
 # Display dimensions (Inky wHAT)
 DISPLAY_WIDTH = 400
@@ -117,8 +118,36 @@ def render_welcome(name):
     return img
 
 
+def _generate_wifi_qr(size):
+    """Generate a WiFi join QR code as a palette-mode PIL image."""
+    ssid = os.environ.get("WIFI_SSID", "")
+    password = os.environ.get("WIFI_PASSWORD", "")
+    if not ssid:
+        return None
+    wifi_string = f"WIFI:T:WPA;S:{ssid};P:{password};;"
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=1,
+        border=1,
+    )
+    qr.add_data(wifi_string)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("L")
+    # Resize to target size using nearest-neighbor to keep sharp pixels
+    qr_img = qr_img.resize((size, size), Image.NEAREST)
+    # Convert to palette mode: white=0, black=1 (matching our palette)
+    palette_qr = Image.new("P", (size, size), WHITE)
+    qr_pixels = qr_img.load()
+    p_pixels = palette_qr.load()
+    for y in range(size):
+        for x in range(size):
+            if qr_pixels[x, y] < 128:
+                p_pixels[x, y] = BLACK
+    return palette_qr
+
+
 def render_dashboard(home_users):
-    """Dashboard: 'Drewtopia' header with a list of who's home."""
+    """Dashboard: 'Drewtopia' header, who's home on left, WiFi QR on right."""
     img, draw = _new_image()
     usable_w = DISPLAY_WIDTH - PADDING * 2
 
@@ -132,13 +161,43 @@ def render_dashboard(home_users):
     draw.line([(PADDING, line_y), (DISPLAY_WIDTH - PADDING, line_y)], fill=BLACK, width=2)
 
     # Content area
-    content_y = line_y + 15
+    content_top = line_y + 15
+    content_bottom = DISPLAY_HEIGHT - PADDING
+    content_h = content_bottom - content_top
+
+    # QR code on the right side — as large as possible
+    qr_label_font = _regular(12)
+    label_text = "drew.com"
+    lw, lh = _text_size(qr_label_font, label_text)
+    qr_size = min(content_h - lh - 4, usable_w // 2)
+    qr_img = _generate_wifi_qr(qr_size)
+
+    if qr_img:
+        # Position QR: right-aligned, vertically centered in content area
+        total_qr_h = qr_size + lh + 4
+        qr_x = DISPLAY_WIDTH - PADDING - qr_size
+        qr_y = content_top + (content_h - total_qr_h) // 2
+        img.paste(qr_img, (qr_x, qr_y))
+
+        # "drew.com" label centered below QR
+        label_x = qr_x + (qr_size - lw) // 2
+        label_y = qr_y + qr_size + 4
+        draw.text((label_x, label_y), label_text, BLACK, qr_label_font)
+
+        # Left column width for names
+        left_col_w = qr_x - PADDING - 10
+    else:
+        left_col_w = usable_w
+
+    # Names on the left
+    content_y = content_top
 
     if not home_users:
-        # Nobody home
         msg_font = _regular(20)
-        mw, _ = _text_size(msg_font, "No one is home")
-        draw.text((_center_x(mw), content_y + 30), "No one is home", BLACK, msg_font)
+        msg = "No one is home"
+        mw, _ = _text_size(msg_font, msg)
+        msg_x = PADDING + (left_col_w - mw) // 2 if left_col_w < usable_w else _center_x(mw)
+        draw.text((msg_x, content_y + 30), msg, BLACK, msg_font)
     else:
         # "Home" label
         label_font = _regular(18)
@@ -146,12 +205,12 @@ def render_dashboard(home_users):
         content_y += 30
 
         # List each user — auto-size to fit available space
-        available_h = DISPLAY_HEIGHT - content_y - PADDING
+        available_h = content_bottom - content_y
         max_name_size = min(36, available_h // max(len(home_users), 1) - 8)
         max_name_size = max(max_name_size, 14)
 
         for user_name in home_users:
-            name_font, _ = _fit_font_bold(user_name, usable_w - 30, max_size=max_name_size)
+            name_font, _ = _fit_font_bold(user_name, left_col_w - 30, max_size=max_name_size)
             nw, nh = _text_size(name_font, user_name)
 
             # Bullet point
@@ -164,7 +223,7 @@ def render_dashboard(home_users):
             draw.text((PADDING + 22, content_y), user_name, BLACK, name_font)
             content_y += nh + 10
 
-            if content_y > DISPLAY_HEIGHT - PADDING:
+            if content_y > content_bottom:
                 break
 
     return img
