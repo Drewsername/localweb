@@ -11,10 +11,12 @@ nest_bp = Blueprint("nest", __name__)
 nest = NestService()
 
 
+OAUTH_REDIRECT_URI = "http://localhost:5000/api/nest/auth/callback"
+
+
 @nest_bp.get("/api/nest/auth/url")
 def auth_url():
-    redirect_uri = request.host_url.rstrip("/") + "/api/nest/auth/callback"
-    return jsonify({"url": nest.get_auth_url(redirect_uri)})
+    return jsonify({"url": nest.get_auth_url(OAUTH_REDIRECT_URI)})
 
 
 @nest_bp.get("/api/nest/auth/callback")
@@ -22,7 +24,7 @@ def auth_callback():
     code = request.args.get("code")
     if not code:
         return jsonify({"error": "Missing authorization code"}), 400
-    redirect_uri = request.host_url.rstrip("/") + "/api/nest/auth/callback"
+    redirect_uri = OAUTH_REDIRECT_URI
     try:
         nest.exchange_code(code, redirect_uri)
         return "<h1>Nest authorized successfully!</h1><p>You can close this tab.</p>"
