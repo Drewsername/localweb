@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 venv/
 .env
+nest_tokens.json
 
 # Node
 node_modules/
