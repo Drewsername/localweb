@@ -233,9 +233,14 @@ class InkyHandler:
         from inky import InkyWHAT
         self.inky_display = InkyWHAT("red")
         self.inky_display.set_border(self.inky_display.WHITE)
+        self._last_bytes = None
 
     def _show(self, img):
         set_current(img)
+        img_bytes = img.tobytes()
+        if img_bytes == self._last_bytes:
+            return
+        self._last_bytes = img_bytes
         rotated = img.rotate(180)
         self.inky_display.set_image(rotated)
         self.inky_display.show()
