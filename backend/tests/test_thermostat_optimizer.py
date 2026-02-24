@@ -46,9 +46,12 @@ def test_empty_users_returns_none():
 
 
 def test_cold_asymmetry_bias():
-    """Verify cold side is penalized more than warm side.
-    User at 72: candidate 70 (2 below) should cost more than candidate 74 (2 above)."""
-    users = [{"preferred_temp": 72, "weight": 1.0}]
-    # With only one user, result should be exactly their pref (within bounds)
+    """Two users equidistant from center: cold asymmetry should push result
+    toward the warmer preference."""
+    users = [
+        {"preferred_temp": 70, "weight": 1.0},
+        {"preferred_temp": 74, "weight": 1.0},
+    ]
     result = compute_optimal_temp(users, min_temp=65, max_temp=78)
-    assert result == 72.0
+    midpoint = 72.0
+    assert result > midpoint, f"Expected result > {midpoint} due to cold penalty, got {result}"
