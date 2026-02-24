@@ -4,6 +4,7 @@ import Welcome from "./pages/Welcome";
 import Home from "./pages/Home";
 import Lights from "./pages/Lights";
 import Display from "./pages/Display";
+import Admin from "./pages/Admin";
 
 function AppRoutes() {
   const { user, loading } = useUser();
@@ -22,6 +23,7 @@ function AppRoutes() {
       <Route path="/home" element={user ? <Home /> : <Navigate to="/" />} />
       <Route path="/lights" element={user ? <Lights /> : <Navigate to="/" />} />
       <Route path="/display" element={user ? <Display /> : <Navigate to="/" />} />
+      <Route path="/admin" element={user?.isAdmin ? <Admin /> : <Navigate to="/" />} />
     </Routes>
   );
 }

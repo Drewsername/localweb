@@ -17,10 +17,12 @@ init_db()
 from routes.users import users_bp
 from routes.settings import settings_bp
 from routes.govee import govee_bp
+from routes.admin import admin_bp
 
 app.register_blueprint(users_bp)
 app.register_blueprint(settings_bp)
 app.register_blueprint(govee_bp)
+app.register_blueprint(admin_bp)
 
 # E-ink driver (only on Pi hardware)
 eink = None

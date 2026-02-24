@@ -1,6 +1,7 @@
 import subprocess
 import re
 import platform
+from functools import wraps
 from flask import Blueprint, jsonify, request
 from db import get_db
 
@@ -35,6 +36,34 @@ def get_client_ip():
     return request.remote_addr
 
 
+def get_current_user():
+    """Resolve request IP → MAC → user dict, or None."""
+    ip = get_client_ip()
+    mac = get_mac_for_ip(ip)
+    if not mac:
+        return None
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id, name FROM users WHERE mac_address = ?", (mac,)
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "name": row["name"]}
+    finally:
+        db.close()
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = get_current_user()
+        if not user or user["name"].lower() != "drew":
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 @users_bp.post("/api/users/register")
 def register():
     data = request.get_json()
@@ -53,6 +82,15 @@ def register():
 
     db = get_db()
     try:
+        # Enforce Drew-uniqueness: only one device can claim "drew"
+        if name.lower() == "drew":
+            taken = db.execute(
+                "SELECT id FROM users WHERE LOWER(name) = 'drew' AND mac_address != ?",
+                (mac,),
+            ).fetchone()
+            if taken:
+                return jsonify({"error": "That name is already taken"}), 409
+
         existing = db.execute(
             "SELECT id, name FROM users WHERE mac_address = ?", (mac,)
         ).fetchone()
@@ -72,7 +110,7 @@ def register():
             db.commit()
             user_id = cursor.lastrowid
 
-        return jsonify({"id": user_id, "name": name})
+        return jsonify({"id": user_id, "name": name, "is_admin": name.lower() == "drew"})
     finally:
         db.close()
 
@@ -94,7 +132,12 @@ def me():
         if not user:
             return jsonify({"error": "User not registered"}), 404
 
-        return jsonify({"id": user["id"], "name": user["name"], "is_home": bool(user["is_home"])})
+        return jsonify({
+            "id": user["id"],
+            "name": user["name"],
+            "is_home": bool(user["is_home"]),
+            "is_admin": user["name"].lower() == "drew",
+        })
     finally:
         db.close()
 

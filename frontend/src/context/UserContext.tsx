@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from "
 interface User {
   id: number;
   name: string;
+  isAdmin: boolean;
 }
 
 interface UserContextType {
@@ -27,7 +28,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           if (r.ok) return r.json();
           throw new Error("not found");
         })
-        .then((data) => setUser({ id: data.id, name: data.name }))
+        .then((data) => setUser({ id: data.id, name: data.name, isAdmin: data.is_admin }))
         .catch(() => {
           localStorage.removeItem("drewtopia_user");
         })
@@ -48,7 +49,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       throw new Error(err.error || "Registration failed");
     }
     const data = await res.json();
-    const u = { id: data.id, name: data.name };
+    const u = { id: data.id, name: data.name, isAdmin: data.is_admin };
     setUser(u);
     localStorage.setItem("drewtopia_user", JSON.stringify(u));
   }

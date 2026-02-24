@@ -42,6 +42,20 @@ export default function Home() {
               </div>
             </Link>
           ))}
+          {user?.isAdmin && (
+            <Link
+              to="/admin"
+              className="block p-5 bg-gray-900 border border-red-900/50 rounded-xl hover:border-red-600 transition-colors active:bg-gray-800"
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-3xl">&#x2699;&#xFE0F;</span>
+                <div>
+                  <h2 className="text-lg font-semibold">Admin</h2>
+                  <p className="text-sm text-gray-400">Database management</p>
+                </div>
+              </div>
+            </Link>
+          )}
         </div>
       </div>
     </div>
