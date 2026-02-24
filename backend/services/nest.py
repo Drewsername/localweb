@@ -94,7 +94,7 @@ class NestService:
                 continue
             devices.append({
                 "id": d["name"].split("/")[-1],
-                "name": traits.get("sdm.devices.traits.Info", {}).get("customName", "Thermostat"),
+                "name": traits.get("sdm.devices.traits.Info", {}).get("customName") or "Thermostat",
                 "full_name": d["name"],
             })
         return devices
