@@ -167,7 +167,7 @@ def render_dashboard(home_users):
 
     # QR code on the right side — as large as possible
     qr_label_font = _regular(12)
-    label_text = "drew.com"
+    label_text = "drew.local"
     lw, lh = _text_size(qr_label_font, label_text)
     qr_size = min(content_h - lh - 4, usable_w // 2)
     qr_img = _generate_wifi_qr(qr_size)
