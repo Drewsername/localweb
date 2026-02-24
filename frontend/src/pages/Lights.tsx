@@ -143,6 +143,7 @@ function DeviceCard({
   const hasBrightness = device.capabilities.some((c) => c.instance === "brightness");
   const hasColor = device.capabilities.some((c) => c.instance === "colorRgb");
 
+  const online = getStateValue("online") !== false;
   const powerOn = getStateValue("powerSwitch") === 1;
   const brightness = (getStateValue("brightness") as number) ?? 100;
   const colorInt = (getStateValue("colorRgb") as number) ?? 16777215;
@@ -166,7 +167,10 @@ function DeviceCard({
   }, [colorHex, pickingColor]);
 
   return (
-    <div className="p-5 bg-gray-900 border border-gray-800 rounded-xl space-y-4">
+    <div className={`p-5 bg-gray-900 border border-gray-800 rounded-xl space-y-4 ${!online ? "opacity-50" : ""}`}>
+      {!online && (
+        <p className="text-xs text-red-400">Device offline</p>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">{device.deviceName || device.sku}</h2>
         {hasPower && (
