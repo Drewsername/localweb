@@ -1,41 +1,35 @@
-import { useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { UserProvider, useUser } from "./context/UserContext";
+import Welcome from "./pages/Welcome";
+import Home from "./pages/Home";
+import Lights from "./pages/Lights";
 
-function App() {
-  const [status, setStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+function AppRoutes() {
+  const { user, loading } = useUser();
 
-  async function sendHello() {
-    setLoading(true);
-    setStatus(null);
-    try {
-      const res = await fetch("/api/eink/hello", { method: "POST" });
-      const data = await res.json();
-      setStatus(res.ok ? data.message : data.error);
-    } catch {
-      setStatus("Failed to connect to backend");
-    } finally {
-      setLoading(false);
-    }
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-      <div className="text-center space-y-6">
-        <h1 className="text-4xl font-bold">localweb</h1>
-        <p className="text-gray-400">Home control system</p>
-        <button
-          onClick={sendHello}
-          disabled={loading}
-          className="px-6 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg font-medium transition-colors"
-        >
-          {loading ? "Sending..." : "Say Hello (E-Ink)"}
-        </button>
-        {status && (
-          <p className="text-sm text-gray-300">{status}</p>
-        )}
-      </div>
-    </div>
+    <Routes>
+      <Route path="/" element={user ? <Navigate to="/home" /> : <Welcome />} />
+      <Route path="/home" element={user ? <Home /> : <Navigate to="/" />} />
+      <Route path="/lights" element={user ? <Lights /> : <Navigate to="/" />} />
+    </Routes>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <UserProvider>
+        <AppRoutes />
+      </UserProvider>
+    </BrowserRouter>
+  );
+}
