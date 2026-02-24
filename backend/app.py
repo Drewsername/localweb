@@ -39,9 +39,11 @@ def health():
 
 @app.post("/api/eink/hello")
 def eink_hello():
-    if eink is None:
-        return jsonify({"error": "E-ink display not available"}), 503
-    eink.hello_world()
+    from drivers.eink import render_hello, set_current
+    if eink:
+        eink.show_image(render_hello())
+    else:
+        set_current(render_hello())
     return jsonify({"message": "Hello World displayed on e-ink"})
 
 
@@ -61,33 +63,15 @@ def fallback(e):
     return send_from_directory(app.static_folder, "index.html")
 
 
-def _show_current_home_user():
-    """On startup, show the most recently seen home user on the e-ink display."""
-    from db import get_db
-    db = get_db()
-    try:
-        user = db.execute(
-            "SELECT name FROM users WHERE is_home = 1 ORDER BY last_seen DESC LIMIT 1"
-        ).fetchone()
-        if user:
-            if eink:
-                eink.welcome(user["name"])
-            else:
-                from drivers.eink import render_welcome, set_current
-                set_current(render_welcome(user["name"]))
-    finally:
-        db.close()
-
-
 if __name__ == "__main__":
-    # Show welcome for whoever is already home
-    _show_current_home_user()
-
     # Start presence scanner
     from services.presence import PresenceScanner
     from routes.govee import govee
 
     scanner = PresenceScanner(eink=eink, govee=govee)
     scanner.start()
+
+    # Show dashboard on startup (shows who's currently home)
+    scanner.show_dashboard()
 
     app.run(host="0.0.0.0", port=5000, debug=True)

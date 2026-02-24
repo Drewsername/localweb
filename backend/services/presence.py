@@ -9,6 +9,7 @@ from db import get_db
 
 SCAN_INTERVAL = 30  # seconds
 DEPARTURE_THRESHOLD = 300  # 5 minutes
+WELCOME_DURATION = 60  # seconds before switching to dashboard
 
 
 class PresenceScanner:
@@ -17,6 +18,8 @@ class PresenceScanner:
         self.govee = govee
         self._thread = None
         self._running = False
+        self._welcome_timer = None
+        self._showing_welcome = False
 
     def start(self):
         self._running = True
@@ -25,6 +28,8 @@ class PresenceScanner:
 
     def stop(self):
         self._running = False
+        if self._welcome_timer:
+            self._welcome_timer.cancel()
 
     def _run(self):
         while self._running:
@@ -53,6 +58,35 @@ class PresenceScanner:
             print(f"ARP scan failed: {e}")
         return macs
 
+    def _get_home_users(self, db):
+        """Get list of names of users currently home, ordered by last_seen DESC."""
+        rows = db.execute(
+            "SELECT name FROM users WHERE is_home = 1 ORDER BY last_seen DESC"
+        ).fetchall()
+        return [r["name"] for r in rows]
+
+    def _update_display(self, img):
+        """Send an image to the e-ink display (or just update the web preview)."""
+        if self.eink:
+            try:
+                self.eink.show_image(img)
+            except Exception as e:
+                print(f"E-ink display failed: {e}")
+        else:
+            from drivers.eink import set_current
+            set_current(img)
+
+    def show_dashboard(self):
+        """Render and display the dashboard showing who's home."""
+        self._showing_welcome = False
+        from drivers.eink import render_dashboard
+        db = get_db()
+        try:
+            home_users = self._get_home_users(db)
+            self._update_display(render_dashboard(home_users))
+        finally:
+            db.close()
+
     def _scan(self):
         network_macs = self._get_network_macs()
         now = datetime.now(timezone.utc)
@@ -63,7 +97,7 @@ class PresenceScanner:
             users = db.execute("SELECT id, name, mac_address, is_home FROM users").fetchall()
 
             newly_arrived = []
-            anyone_home = False
+            someone_departed = False
 
             for user in users:
                 mac = user["mac_address"]
@@ -71,7 +105,6 @@ class PresenceScanner:
                 is_now_home = mac in network_macs
 
                 if is_now_home:
-                    anyone_home = True
                     db.execute(
                         "UPDATE users SET is_home = 1, last_seen = ? WHERE id = ?",
                         (now.isoformat(), user["id"]),
@@ -79,7 +112,6 @@ class PresenceScanner:
                     if not was_home:
                         newly_arrived.append(user)
                 else:
-                    # Only mark as departed if not seen for DEPARTURE_THRESHOLD
                     if was_home:
                         row = db.execute(
                             "SELECT last_seen FROM users WHERE id = ?",
@@ -94,26 +126,17 @@ class PresenceScanner:
                                     "UPDATE users SET is_home = 0 WHERE id = ?",
                                     (user["id"],),
                                 )
-                                anyone_home = anyone_home or False
+                                someone_departed = True
 
             db.commit()
 
-            # Handle arrivals — most recent arrival (last in the list processed) wins
+            # Handle arrivals — most recent arrival wins
             if newly_arrived:
                 latest = newly_arrived[-1]
                 self._on_arrival(latest, db)
-
-            # Handle everyone departed
-            if not anyone_home:
-                still_home = db.execute(
-                    "SELECT COUNT(*) as c FROM users WHERE is_home = 1"
-                ).fetchone()
-                if still_home["c"] == 0:
-                    if self.eink:
-                        self.eink.idle()
-                    else:
-                        from drivers.eink import render_idle, set_current
-                        set_current(render_idle())
+            elif someone_departed and not self._showing_welcome:
+                # Someone left — refresh dashboard
+                self.show_dashboard()
 
         finally:
             db.close()
@@ -122,15 +145,19 @@ class PresenceScanner:
         """Handle a user arriving home."""
         name = user["name"]
 
-        # Update e-ink display
-        if self.eink:
-            try:
-                self.eink.welcome(name)
-            except Exception as e:
-                print(f"E-ink welcome failed: {e}")
-        else:
-            from drivers.eink import render_welcome, set_current
-            set_current(render_welcome(name))
+        # Cancel any existing welcome timer
+        if self._welcome_timer:
+            self._welcome_timer.cancel()
+
+        # Show welcome screen
+        from drivers.eink import render_welcome
+        self._showing_welcome = True
+        self._update_display(render_welcome(name))
+
+        # After WELCOME_DURATION seconds, switch to dashboard
+        self._welcome_timer = threading.Timer(WELCOME_DURATION, self.show_dashboard)
+        self._welcome_timer.daemon = True
+        self._welcome_timer.start()
 
         # Apply user's Govee settings
         if self.govee:
