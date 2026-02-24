@@ -32,6 +32,7 @@ def device_state(device_id):
 @govee_bp.post("/api/govee/devices/<path:device_id>/control")
 def control_device(device_id):
     data = request.get_json()
+    print(f"[govee control] device={device_id} body={data}")
     if not data or "capability" not in data:
         return jsonify({"error": "capability object is required"}), 400
 

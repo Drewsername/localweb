@@ -229,11 +229,12 @@ function DeviceCard({
             type="color"
             value={localColor}
             onChange={(e) => {
-              setLocalColor(e.target.value);
+              const hex = e.target.value;
+              setLocalColor(hex);
               setPickingColor(true);
               clearTimeout(colorTimer.current);
               colorTimer.current = setTimeout(() => {
-                const rgb = parseInt(e.target.value.slice(1), 16);
+                const rgb = parseInt(hex.slice(1), 16);
                 onControl({
                   type: "devices.capabilities.color_setting",
                   instance: "colorRgb",
