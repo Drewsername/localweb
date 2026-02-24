@@ -8,6 +8,12 @@ const apps = [
     path: "/lights",
     icon: "\u{1F4A1}",
   },
+  {
+    name: "Display",
+    description: "View the e-ink display",
+    path: "/display",
+    icon: "\u{1F5BC}\u{FE0F}",
+  },
 ];
 
 export default function Home() {

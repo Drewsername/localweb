@@ -1,55 +1,80 @@
-from inky import InkyWHAT
+import io
 from PIL import Image, ImageFont, ImageDraw
+
+# Display dimensions (Inky wHAT)
+DISPLAY_WIDTH = 400
+DISPLAY_HEIGHT = 300
+FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+# Color constants matching Inky wHAT palette
+WHITE = 0
+BLACK = 1
+RED = 2
 
 
 class InkyHandler:
     def __init__(self):
+        from inky import InkyWHAT
         self.inky_display = InkyWHAT("red")
         self.inky_display.set_border(self.inky_display.WHITE)
+        self.current_img = None
 
-    def clear(self):
-        self.img = Image.new("P", (self.inky_display.WIDTH, self.inky_display.HEIGHT))
-        self.draw = ImageDraw.Draw(self.img)
+    def _new_image(self):
+        img = Image.new("P", (DISPLAY_WIDTH, DISPLAY_HEIGHT), WHITE)
+        draw = ImageDraw.Draw(img)
+        return img, draw
 
-    def draw_text(self, message, size=48, position="c", color=None):
-        if color is None:
-            color = self.inky_display.RED
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
-        bbox = font.getbbox(message)
-        m_w, m_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        d_w, d_h = self.inky_display.WIDTH, self.inky_display.HEIGHT
+    def _center_text(self, draw, text, font, y, color):
+        """Draw text horizontally centered at a given y position."""
+        bb = font.getbbox(text)
+        w = bb[2] - bb[0]
+        x = (DISPLAY_WIDTH - w) // 2
+        draw.text((x, y), text, color, font)
 
-        if position == "c":
-            x = (d_w - m_w) // 2
-            y = (d_h - m_h) // 2
-        elif position == "br":
-            x = d_w - m_w
-            y = d_h - m_h
-        elif position == "tc":
-            x = (d_w - m_w) // 2
-            y = 0
-        else:
-            x, y = 0, 0
-
-        self.draw.text((x, y), message, color, font)
-
-    def show(self):
-        img = self.img.rotate(180)
-        self.inky_display.set_image(img)
+    def _show(self, img):
+        self.current_img = img
+        rotated = img.rotate(180)
+        self.inky_display.set_image(rotated)
         self.inky_display.show()
 
+    def get_display_png(self):
+        """Return current display image as PNG bytes for the web preview."""
+        if self.current_img is None:
+            return None
+        # Convert palette image to RGB for PNG export with correct colors
+        rgb = Image.new("RGB", self.current_img.size, (255, 255, 255))
+        pixels = self.current_img.load()
+        rgb_pixels = rgb.load()
+        for y in range(self.current_img.height):
+            for x in range(self.current_img.width):
+                p = pixels[x, y]
+                if p == BLACK:
+                    rgb_pixels[x, y] = (0, 0, 0)
+                elif p == RED:
+                    rgb_pixels[x, y] = (200, 0, 0)
+                # WHITE stays (255, 255, 255)
+        buf = io.BytesIO()
+        rgb.save(buf, format="PNG")
+        return buf.getvalue()
+
     def hello_world(self):
-        self.clear()
-        self.draw_text("Hello World!", size=64, position="c")
-        self.show()
+        img, draw = self._new_image()
+        font = ImageFont.truetype(FONT_PATH, 36)
+        self._center_text(draw, "Hello World!", font, 130, BLACK)
+        self._show(img)
 
     def welcome(self, name):
-        self.clear()
-        self.draw_text("Welcome home,", size=36, position="tc")
-        self.draw_text(name + "!", size=52, position="c")
-        self.show()
+        img, draw = self._new_image()
+        line1_font = ImageFont.truetype(FONT_PATH, 24)
+        name_font = ImageFont.truetype(FONT_PATH, 36)
+        # "Welcome home," in black, positioned above center
+        self._center_text(draw, "Welcome home,", line1_font, 110, BLACK)
+        # Name in red, below
+        self._center_text(draw, name + "!", name_font, 145, RED)
+        self._show(img)
 
     def idle(self):
-        self.clear()
-        self.draw_text("Drewtopia", size=56, position="c")
-        self.show()
+        img, draw = self._new_image()
+        font = ImageFont.truetype(FONT_PATH, 36)
+        self._center_text(draw, "Drewtopia", font, 130, RED)
+        self._show(img)

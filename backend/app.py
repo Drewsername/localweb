@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, send_from_directory
 from flask_cors import CORS
 from db import init_db
 
@@ -43,6 +43,16 @@ def eink_hello():
         return jsonify({"error": "E-ink display not available"}), 503
     eink.hello_world()
     return jsonify({"message": "Hello World displayed on e-ink"})
+
+
+@app.get("/api/display")
+def display_image():
+    if eink is None:
+        return jsonify({"error": "E-ink display not available"}), 503
+    png = eink.get_display_png()
+    if png is None:
+        return jsonify({"error": "No image rendered yet"}), 404
+    return Response(png, mimetype="image/png")
 
 
 @app.get("/")

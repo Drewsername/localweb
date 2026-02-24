@@ -3,6 +3,7 @@ import { UserProvider, useUser } from "./context/UserContext";
 import Welcome from "./pages/Welcome";
 import Home from "./pages/Home";
 import Lights from "./pages/Lights";
+import Display from "./pages/Display";
 
 function AppRoutes() {
   const { user, loading } = useUser();
@@ -20,6 +21,7 @@ function AppRoutes() {
       <Route path="/" element={user ? <Navigate to="/home" /> : <Welcome />} />
       <Route path="/home" element={user ? <Home /> : <Navigate to="/" />} />
       <Route path="/lights" element={user ? <Lights /> : <Navigate to="/" />} />
+      <Route path="/display" element={user ? <Display /> : <Navigate to="/" />} />
     </Routes>
   );
 }
