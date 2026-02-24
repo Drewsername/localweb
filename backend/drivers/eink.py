@@ -42,3 +42,14 @@ class InkyHandler:
         self.clear()
         self.draw_text("Hello World!", size=64, position="c")
         self.show()
+
+    def welcome(self, name):
+        self.clear()
+        self.draw_text("Welcome home,", size=36, position="tc")
+        self.draw_text(name + "!", size=52, position="c")
+        self.show()
+
+    def idle(self):
+        self.clear()
+        self.draw_text("Drewtopia", size=56, position="c")
+        self.show()
