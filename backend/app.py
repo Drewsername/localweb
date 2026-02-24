@@ -91,6 +91,6 @@ if __name__ == "__main__":
     scanner.start()
 
     # Show dashboard on startup (shows who's currently home)
-    scanner.show_dashboard()
+    scanner.show_dashboard(force=True)
 
     app.run(host="0.0.0.0", port=5000, debug=True)

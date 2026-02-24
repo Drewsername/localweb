@@ -12,6 +12,9 @@ DEPARTURE_THRESHOLD = 15  # seconds — 3 missed scans = gone
 WELCOME_DURATION = 60  # seconds before switching to dashboard
 
 
+REWELCOME_COOLDOWN = 300  # seconds — don't re-welcome same user within 5 min
+
+
 class PresenceScanner:
     def __init__(self, eink=None, govee=None):
         self.eink = eink
@@ -20,6 +23,9 @@ class PresenceScanner:
         self._running = False
         self._welcome_timer = None
         self._showing_welcome = False
+        self._last_dashboard_users = None  # track displayed home list
+        self._last_welcome_name = None
+        self._last_welcome_time = None
 
     def start(self):
         self._running = True
@@ -118,13 +124,16 @@ class PresenceScanner:
             from drivers.eink import set_current
             set_current(img)
 
-    def show_dashboard(self):
+    def show_dashboard(self, force=False):
         """Render and display the dashboard showing who's home."""
         self._showing_welcome = False
         from drivers.eink import render_dashboard
         db = get_db()
         try:
             home_users = self._get_home_users(db)
+            if not force and home_users == self._last_dashboard_users:
+                return
+            self._last_dashboard_users = home_users
             self._update_display(render_dashboard(home_users))
         finally:
             db.close()
@@ -192,6 +201,19 @@ class PresenceScanner:
     def _on_arrival(self, user, db):
         """Handle a user arriving home."""
         name = user["name"]
+        now = time.time()
+
+        # Skip re-welcome if same user just arrived recently (phone oscillation)
+        if (
+            self._last_welcome_name == name
+            and self._last_welcome_time
+            and now - self._last_welcome_time < REWELCOME_COOLDOWN
+        ):
+            # Silently mark as home, update dashboard without welcome fanfare
+            self._last_dashboard_users = None  # force dashboard refresh
+            if not self._showing_welcome:
+                self.show_dashboard()
+            return
 
         # Cancel any existing welcome timer
         if self._welcome_timer:
@@ -200,6 +222,8 @@ class PresenceScanner:
         # Show welcome screen
         from drivers.eink import render_welcome
         self._showing_welcome = True
+        self._last_welcome_name = name
+        self._last_welcome_time = now
         self._update_display(render_welcome(name))
 
         # After WELCOME_DURATION seconds, switch to dashboard
