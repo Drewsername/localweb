@@ -28,6 +28,7 @@ if os.environ.get("LOCALWEB_ENV") != "dev":
     try:
         from drivers.eink import InkyHandler
         eink = InkyHandler()
+        eink.idle()  # Show default screen on startup
     except Exception as e:
         print(f"E-ink not available: {e}")
 
@@ -47,12 +48,8 @@ def eink_hello():
 
 @app.get("/api/display")
 def display_image():
-    if eink is None:
-        return jsonify({"error": "E-ink display not available"}), 503
-    png = eink.get_display_png()
-    if png is None:
-        return jsonify({"error": "No image rendered yet"}), 404
-    return Response(png, mimetype="image/png")
+    from drivers.eink import get_display_png
+    return Response(get_display_png(), mimetype="image/png")
 
 
 @app.get("/")

@@ -108,8 +108,12 @@ class PresenceScanner:
                 still_home = db.execute(
                     "SELECT COUNT(*) as c FROM users WHERE is_home = 1"
                 ).fetchone()
-                if still_home["c"] == 0 and self.eink:
-                    self.eink.idle()
+                if still_home["c"] == 0:
+                    if self.eink:
+                        self.eink.idle()
+                    else:
+                        from drivers.eink import render_idle, set_current
+                        set_current(render_idle())
 
         finally:
             db.close()
@@ -124,6 +128,9 @@ class PresenceScanner:
                 self.eink.welcome(name)
             except Exception as e:
                 print(f"E-ink welcome failed: {e}")
+        else:
+            from drivers.eink import render_welcome, set_current
+            set_current(render_welcome(name))
 
         # Apply user's Govee settings
         if self.govee:
