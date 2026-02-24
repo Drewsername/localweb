@@ -1,13 +1,28 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
+from db import init_db
 
-# Serve built frontend from frontend/dist
 static_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 app = Flask(__name__, static_folder=static_dir, static_url_path="")
 CORS(app)
 
-# Only import e-ink driver on the Pi (it requires hardware)
+init_db()
+
+# Register blueprints
+from routes.users import users_bp
+from routes.settings import settings_bp
+from routes.govee import govee_bp
+
+app.register_blueprint(users_bp)
+app.register_blueprint(settings_bp)
+app.register_blueprint(govee_bp)
+
+# E-ink driver (only on Pi hardware)
 eink = None
 if os.environ.get("LOCALWEB_ENV") != "dev":
     try:
@@ -41,4 +56,11 @@ def fallback(e):
 
 
 if __name__ == "__main__":
+    # Start presence scanner
+    from services.presence import PresenceScanner
+    from routes.govee import govee
+
+    scanner = PresenceScanner(eink=eink, govee=govee)
+    scanner.start()
+
     app.run(host="0.0.0.0", port=5000, debug=True)
