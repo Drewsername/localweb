@@ -219,8 +219,8 @@ DARK_COLOR_MAP = {
     RED: (255, 255, 255),
 }
 
-# Lookup table: map WHITE→BLACK, BLACK→WHITE, RED→WHITE (index 2→1)
-_DARK_LUT = [1, 0, 1] + list(range(3, 256))
+# Lookup table: map WHITE→BLACK(1), BLACK→WHITE(0), RED→WHITE(0)
+_DARK_LUT = [1, 0, 0] + list(range(3, 256))
 
 
 def set_dark_mode(enabled):

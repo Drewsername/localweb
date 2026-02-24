@@ -80,9 +80,9 @@ export default function Display() {
           </button>
           <button
             onClick={toggleDarkMode}
-            className={`flex-1 px-4 py-3 rounded-lg font-medium transition-colors ${
+            className={`flex-1 px-4 py-3 rounded-lg font-medium active:scale-95 transition-all ${
               darkMode
-                ? "bg-gray-200 text-gray-900 hover:bg-gray-300"
+                ? "bg-white text-black hover:bg-gray-200"
                 : "bg-gray-800 hover:bg-gray-700"
             }`}
           >
