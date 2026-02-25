@@ -79,8 +79,8 @@ class PresenceScanner:
     def _get_reachable_macs(self):
         """Get MAC addresses that are actually reachable on the network.
 
-        On Linux, filters out FAILED entries from `ip neigh` so we only
-        count devices that responded to recent pings.
+        On Linux, only includes REACHABLE entries from `ip neigh` — devices
+        that responded to a recent ARP/NDP probe after our ping.
         """
         macs = set()
         try:
@@ -95,8 +95,11 @@ class PresenceScanner:
             else:
                 output = subprocess.check_output(["ip", "neigh"], text=True)
                 for line in output.splitlines():
-                    # Skip entries that are FAILED (device not responding)
-                    if "FAILED" in line:
+                    # Only count REACHABLE entries — device confirmed via ARP/NDP.
+                    # STALE/DELAY/PROBE entries retain stale MACs (especially
+                    # IPv6 link-local entries we never ping) and cause false
+                    # "home" detections.
+                    if "REACHABLE" not in line:
                         continue
                     match = re.search(
                         r"([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", line
