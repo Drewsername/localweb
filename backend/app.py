@@ -96,4 +96,5 @@ if __name__ == "__main__":
     # Show dashboard on startup (shows who's currently home)
     scanner.show_dashboard(force=True)
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    is_dev = os.environ.get("LOCALWEB_ENV") == "dev"
+    app.run(host="0.0.0.0", port=5000, debug=is_dev)
