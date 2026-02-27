@@ -4,12 +4,15 @@ Runs a lightweight HTTP server on a separate port that serves raw PCM
 audio as a WAV stream.  The persistent pipe reader in the light show
 engine pushes audio chunks into the shared buffer; the Sonos speaker
 fetches them over HTTP.
+
+The buffer uses a broadcast model: every HTTP connection gets its own
+independent view of the audio stream so that Sonos probe requests
+don't steal data from the real playback connection.
 """
 
 import logging
 import struct
 import threading
-import time
 from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -30,8 +33,6 @@ def _wav_header():
     """
     byte_rate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE // 8
     block_align = CHANNELS * BITS_PER_SAMPLE // 8
-    # Keep both sizes within signed-int32 range (max 0x7FFFFFFF).
-    # file_size = data_size + 36, so data_size = 0x7FFFFFFF - 36.
     data_size = 0x7FFFFFDB
     file_size = 0x7FFFFFFF
     return struct.pack(
@@ -53,48 +54,71 @@ def _wav_header():
 
 
 class AudioBuffer:
-    """Thread-safe circular buffer for audio chunks."""
+    """Thread-safe broadcast buffer for audio chunks.
 
-    def __init__(self, max_chunks=600):
-        self._buf = deque(maxlen=max_chunks)
-        self._cond = threading.Condition()
-        self._closed = False
+    Each consumer subscribes and gets its own queue.  ``put()``
+    broadcasts every chunk to all active subscribers so no data is
+    lost when multiple HTTP connections read concurrently (e.g. Sonos
+    probe + real playback).
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._subscribers: list[deque] = []
+        self._conds: list[threading.Condition] = []
+
+    # -- producer API (called by pipe reader) --
 
     def put(self, chunk: bytes):
-        with self._cond:
-            self._buf.append(chunk)
-            self._cond.notify_all()
-
-    def get(self, timeout=2.0):
-        with self._cond:
-            if timeout == 0.0:
-                # Non-blocking: return immediately if nothing available
-                if self._buf:
-                    return self._buf.popleft()
-                return None
-            while not self._buf and not self._closed:
-                if not self._cond.wait(timeout):
-                    return None
-            if self._buf:
-                return self._buf.popleft()
-            return None
-
-    @property
-    def qsize(self):
-        return len(self._buf)
+        with self._lock:
+            for i, q in enumerate(self._subscribers):
+                q.append(chunk)
+                with self._conds[i]:
+                    self._conds[i].notify_all()
 
     def clear(self):
-        with self._cond:
-            self._buf.clear()
+        with self._lock:
+            for q in self._subscribers:
+                q.clear()
 
-    def close(self):
-        with self._cond:
-            self._closed = True
-            self._cond.notify_all()
+    # -- consumer API (called by HTTP handlers) --
 
-    def reopen(self):
-        with self._cond:
-            self._closed = False
+    def subscribe(self):
+        """Return a subscriber id.  Call ``get(sid)`` to read."""
+        q = deque(maxlen=1200)  # ~28 s of audio at 44100 Hz
+        cond = threading.Condition()
+        with self._lock:
+            self._subscribers.append(q)
+            self._conds.append(cond)
+            sid = len(self._subscribers) - 1
+        logger.debug("AudioBuffer: subscriber %d registered", sid)
+        return sid
+
+    def unsubscribe(self, sid):
+        with self._lock:
+            if 0 <= sid < len(self._subscribers):
+                # Mark slot as dead (don't shift indices mid-stream)
+                self._subscribers[sid] = None
+                self._conds[sid] = None
+        logger.debug("AudioBuffer: subscriber %d removed", sid)
+
+    def get(self, sid, timeout=2.0):
+        """Read the next chunk for subscriber *sid*."""
+        with self._lock:
+            if sid >= len(self._subscribers) or self._subscribers[sid] is None:
+                return None
+            q = self._subscribers[sid]
+            cond = self._conds[sid]
+
+        with cond:
+            if timeout == 0.0:
+                if q:
+                    return q.popleft()
+                return None
+            while not q:
+                if not cond.wait(timeout):
+                    return None
+            return q.popleft()
 
 
 class _StreamHandler(BaseHTTPRequestHandler):
@@ -102,7 +126,6 @@ class _StreamHandler(BaseHTTPRequestHandler):
     audio_buffer = None
 
     def do_HEAD(self):
-        """Sonos probes with HEAD before fetching the stream."""
         logger.info("Stream HEAD from %s:%d", *self.client_address)
         if self.path not in ("/stream", "/stream.wav"):
             self.send_error(404)
@@ -127,6 +150,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, no-store")
         self.end_headers()
 
+        sid = self.audio_buffer.subscribe()
         total_bytes = 0
         silence_bytes = 0
         writes = 0
@@ -136,19 +160,15 @@ class _StreamHandler(BaseHTTPRequestHandler):
             total_bytes += 44
 
             while True:
-                # Collect available chunks into a batch to reduce
-                # syscall and TCP overhead (better for Sonos buffering).
                 batch = bytearray()
-                chunk = self.audio_buffer.get(timeout=2.0)
+                chunk = self.audio_buffer.get(sid, timeout=2.0)
                 if chunk is None:
-                    # No data — send silence to keep connection alive.
                     batch.extend(b"\x00" * 4096)
                     silence_bytes += 4096
                 else:
                     batch.extend(chunk)
-                    # Drain up to 10 more queued chunks for this write
                     for _ in range(10):
-                        extra = self.audio_buffer.get(timeout=0.0)
+                        extra = self.audio_buffer.get(sid, timeout=0.0)
                         if extra is None:
                             break
                         batch.extend(extra)
@@ -167,9 +187,10 @@ class _StreamHandler(BaseHTTPRequestHandler):
             logger.exception("Stream unexpected error for %s:%d after %d bytes",
                              self.client_address[0], self.client_address[1],
                              total_bytes)
+        finally:
+            self.audio_buffer.unsubscribe(sid)
 
     def log_message(self, fmt, *args):
-        # Suppress default access log; we log manually above.
         pass
 
 
@@ -202,7 +223,6 @@ class AudioStreamer:
             self._server.shutdown()
             self._server = None
             self._thread = None
-            self.buffer.close()
             logger.info("Audio stream server stopped")
 
     @property
