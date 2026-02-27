@@ -1,12 +1,16 @@
 from flask import Blueprint, jsonify, request
 from services.spotify import SpotifyService
 from services.govee_lan import GoveeLanService
+from services.audio_streamer import AudioStreamer
+from services.sonos import SonosService
 from services.lightshow import LightShowEngine
 
 spotify_bp = Blueprint("spotify", __name__)
 spotify = SpotifyService()
 govee_lan = GoveeLanService()
-lightshow = LightShowEngine(govee_lan)
+audio_streamer = AudioStreamer()
+sonos = SonosService()
+lightshow = LightShowEngine(govee_lan, audio_streamer, sonos)
 
 OAUTH_REDIRECT_URI = "https://10.0.0.74/api/spotify/auth/callback"
 

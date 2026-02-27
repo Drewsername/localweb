@@ -63,8 +63,10 @@ class LightShowEngine:
         engine.stop()
     """
 
-    def __init__(self, govee_lan):
+    def __init__(self, govee_lan, audio_streamer=None, sonos_service=None):
         self._govee = govee_lan
+        self._streamer = audio_streamer
+        self._sonos = sonos_service
         self._running = False
         self._lock = threading.Lock()
 
@@ -85,6 +87,11 @@ class LightShowEngine:
         self._beat_count = 0  # total beats detected (for party alternation)
         self._last_rms = 0.0
         self._audio_connected = False  # True when pipe reader has a live fd
+        self._sonos_started = False  # True once Sonos forwarding began
+
+        # Start the HTTP audio stream server
+        if self._streamer:
+            self._streamer.start()
 
         # Start persistent pipe reader (keeps pipe drained so librespot
         # never blocks, and feeds audio to analysis when show is active)
@@ -213,8 +220,9 @@ class LightShowEngine:
         """Always drain the audio pipe so librespot never blocks.
 
         When the light show is active, audio data is analysed and used to
-        drive lights.  When inactive, data is simply discarded.  The thread
-        runs for the lifetime of the process.
+        drive lights.  Audio is always forwarded to the Sonos streamer
+        buffer so the speaker can play it.  The thread runs for the
+        lifetime of the process.
         """
         while True:
             if not os.path.exists(PIPE_PATH):
@@ -229,6 +237,7 @@ class LightShowEngine:
                 # Blocking open — waits until librespot opens the write end
                 fd = os.open(PIPE_PATH, os.O_RDONLY)
                 self._audio_connected = True
+                self._sonos_started = False
                 logger.info("Pipe reader: connected to %s", PIPE_PATH)
 
                 while True:
@@ -238,6 +247,17 @@ class LightShowEngine:
                     if not raw:
                         # Writer closed pipe (librespot restarted)
                         break
+
+                    # Always forward audio to Sonos stream buffer
+                    if self._streamer:
+                        self._streamer.buffer.put(raw)
+
+                    # Auto-start Sonos forwarding on first audio chunk
+                    if not self._sonos_started and self._sonos and self._streamer:
+                        self._sonos_started = True
+                        threading.Thread(
+                            target=self._start_sonos_forwarding, daemon=True
+                        ).start()
 
                     if self._running and len(raw) == CHUNK_BYTES:
                         samples = np.frombuffer(raw, dtype=np.int16)
@@ -267,6 +287,9 @@ class LightShowEngine:
                 logger.debug("Pipe reader: %s, retrying...", exc)
             finally:
                 self._audio_connected = False
+                if self._sonos_started and self._sonos:
+                    self._sonos.stop_forwarding()
+                    self._sonos_started = False
                 if fd is not None:
                     try:
                         os.close(fd)
@@ -275,6 +298,13 @@ class LightShowEngine:
 
             # Brief pause before reconnecting
             time.sleep(1.0)
+
+    def _start_sonos_forwarding(self):
+        """Tell the Sonos speaker to play from our audio stream (background)."""
+        try:
+            self._sonos.start_forwarding(self._streamer.stream_url)
+        except Exception:
+            logger.exception("Failed to start Sonos forwarding")
 
     # ------------------------------------------------------------------
     # Audio analysis

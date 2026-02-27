@@ -8,3 +8,4 @@ python-dotenv>=1.0
 requests>=2.31
 urllib3<2
 qrcode[pil]>=7.4
+soco>=0.30
