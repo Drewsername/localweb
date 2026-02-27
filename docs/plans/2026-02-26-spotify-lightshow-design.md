@@ -44,7 +44,7 @@ The Pi is a Raspberry Pi running Raspbian Stretch with Python 3.9. Every design 
 ## Spotify Integration
 
 ### OAuth (Web API)
-- Client ID: `<redacted>`
+- Client ID: stored in `backend/.env` as `SPOTIFY_CLIENT_ID`
 - Client Secret: stored in `backend/.env` as `SPOTIFY_CLIENT_SECRET`
 - Redirect URI: `http://10.0.0.74:5000/api/spotify/auth/callback`
 - Scopes: `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`
@@ -221,8 +221,8 @@ WantedBy=multi-user.target
 
 ### Environment variables (backend/.env)
 ```
-SPOTIFY_CLIENT_ID=<redacted>
-SPOTIFY_CLIENT_SECRET=<redacted>
+SPOTIFY_CLIENT_ID=<your-client-id>
+SPOTIFY_CLIENT_SECRET=<your-client-secret>
 ```
 
 ## Risk Mitigations

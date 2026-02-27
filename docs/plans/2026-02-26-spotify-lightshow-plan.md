@@ -549,8 +549,8 @@ Also export the spotify service instance for use by lightshow engine. In `backen
 **Step 3: Add env vars to backend/.env**
 
 ```
-SPOTIFY_CLIENT_ID=<redacted>
-SPOTIFY_CLIENT_SECRET=<redacted>
+SPOTIFY_CLIENT_ID=<your-client-id>
+SPOTIFY_CLIENT_SECRET=<your-client-secret>
 ```
 
 **Step 4: Commit**
@@ -1542,8 +1542,8 @@ git commit -m "feat: add librespot systemd service and deployment"
 **Step 1: Add Spotify env vars to backend/.env**
 
 ```
-SPOTIFY_CLIENT_ID=<redacted>
-SPOTIFY_CLIENT_SECRET=<redacted>
+SPOTIFY_CLIENT_ID=<your-client-id>
+SPOTIFY_CLIENT_SECRET=<your-client-secret>
 ```
 
 **Step 2: Build frontend**
