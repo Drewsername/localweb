@@ -28,6 +28,20 @@ def auth_callback():
         return jsonify({"error": str(e)}), 502
 
 
+@spotify_bp.post("/api/spotify/auth/exchange")
+def auth_exchange():
+    """Manual code exchange — paste the code from the redirect URL."""
+    data = request.get_json()
+    code = data.get("code") if data else None
+    if not code:
+        return jsonify({"error": "code is required"}), 400
+    try:
+        spotify.exchange_code(code, OAUTH_REDIRECT_URI)
+        return jsonify({"authenticated": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @spotify_bp.get("/api/spotify/auth/status")
 def auth_status():
     return jsonify({"authenticated": spotify.is_authenticated})

@@ -312,15 +312,46 @@ export default function Spotify() {
     }
   }
 
+  const [authStep, setAuthStep] = useState<"idle" | "waiting_for_code">("idle");
+  const [authCode, setAuthCode] = useState("");
+  const [authError, setAuthError] = useState("");
+
   async function handleConnectSpotify() {
     try {
       const res = await fetch("/api/spotify/auth/url");
       if (res.ok) {
         const data = await res.json();
         window.open(data.url, "_blank");
+        setAuthStep("waiting_for_code");
+        setAuthError("");
       }
     } catch {
       /* ignore */
+    }
+  }
+
+  async function handleSubmitCode() {
+    // Extract code from full URL or bare code
+    let code = authCode.trim();
+    const match = code.match(/[?&]code=([^&]+)/);
+    if (match) code = match[1];
+
+    if (!code) return;
+    setAuthError("");
+    try {
+      const res = await fetch("/api/spotify/auth/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (data.authenticated) {
+        setAuthenticated(true);
+      } else {
+        setAuthError(data.error || "Authorization failed");
+      }
+    } catch {
+      setAuthError("Failed to connect");
     }
   }
 
@@ -344,16 +375,51 @@ export default function Spotify() {
             <Link to="/home" className="text-gray-400 hover:text-white text-2xl transition-colors">&larr;</Link>
             <h1 className="text-2xl font-bold">Spotify</h1>
           </div>
-          <div className="flex flex-col items-center gap-6 py-12">
-            <p className="text-gray-400 text-center">
-              Connect your Spotify account to control playback and run light shows.
-            </p>
-            <button
-              onClick={handleConnectSpotify}
-              className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition-colors"
-            >
-              Connect Spotify
-            </button>
+          <div className="flex flex-col items-center gap-6 py-8">
+            {authStep === "idle" ? (
+              <>
+                <p className="text-gray-400 text-center">
+                  Connect your Spotify account to control playback and run light shows.
+                </p>
+                <button
+                  onClick={handleConnectSpotify}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition-colors"
+                >
+                  Connect Spotify
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-400 text-center text-sm">
+                  Authorize in the Spotify tab, then paste the URL it redirects you to (it won't load — that's fine).
+                </p>
+                <input
+                  type="text"
+                  value={authCode}
+                  onChange={(e) => setAuthCode(e.target.value)}
+                  placeholder="Paste redirect URL or code here"
+                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 text-sm focus:border-green-600 focus:outline-none"
+                />
+                {authError && (
+                  <p className="text-red-400 text-sm">{authError}</p>
+                )}
+                <div className="flex gap-3 w-full">
+                  <button
+                    onClick={() => { setAuthStep("idle"); setAuthCode(""); setAuthError(""); }}
+                    className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold rounded-lg transition-colors"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleSubmitCode}
+                    disabled={!authCode.trim()}
+                    className="flex-1 py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-lg transition-colors"
+                  >
+                    Connect
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
