@@ -8,6 +8,7 @@ Designed for Raspberry Pi: small FFT (1024 samples), 30 Hz analysis loop,
 throttled to 20 commands/sec per light.
 """
 
+import fcntl
 import logging
 import math
 import os
@@ -42,6 +43,11 @@ BEAT_HISTORY_LEN = 40  # rolling window (~1 second at 30 Hz)
 # -- Throttling -------------------------------------------------------------
 MIN_CMD_INTERVAL = 0.05  # 50ms = 20 cmd/sec per light
 LOOP_PERIOD = 1.0 / 30   # ~33ms for 30 Hz analysis loop
+
+# -- Sonos pre-buffer -------------------------------------------------------
+# Accumulate this many chunks before telling Sonos to start playing, so
+# it has data immediately when it connects (~0.5 s at 44100 Hz).
+SONOS_PREBUFFER_CHUNKS = 20
 
 # -- Light show defaults ----------------------------------------------------
 WARM_WHITE = (255, 180, 100)
@@ -88,6 +94,7 @@ class LightShowEngine:
         self._last_rms = 0.0
         self._audio_connected = False  # True when pipe reader has a live fd
         self._sonos_started = False  # True once Sonos forwarding began
+        self._chunks_since_connect = 0
 
         # Start the HTTP audio stream server
         if self._streamer:
@@ -223,10 +230,13 @@ class LightShowEngine:
         drive lights.  Audio is always forwarded to the Sonos streamer
         buffer so the speaker can play it.  The thread runs for the
         lifetime of the process.
+
+        The pipe is always drained at full speed to prevent back-pressure
+        on librespot.  Light-show analysis runs at 30 Hz on the most
+        recent chunk; all other chunks are forwarded to Sonos without delay.
         """
         while True:
             if not os.path.exists(PIPE_PATH):
-                # No pipe yet — drive idle patterns if show is active
                 if self._running:
                     self._drive_idle_pattern()
                 time.sleep(0.5)
@@ -238,50 +248,66 @@ class LightShowEngine:
                 fd = os.open(PIPE_PATH, os.O_RDONLY)
                 self._audio_connected = True
                 self._sonos_started = False
+                self._chunks_since_connect = 0
                 logger.info("Pipe reader: connected to %s", PIPE_PATH)
 
-                while True:
-                    loop_start = time.time()
+                last_analysis = 0.0
 
+                while True:
+                    # --- Blocking read of one chunk ---
                     raw = os.read(fd, CHUNK_BYTES)
                     if not raw:
-                        # Writer closed pipe (librespot restarted)
                         break
 
-                    # Always forward audio to Sonos stream buffer
                     if self._streamer:
                         self._streamer.buffer.put(raw)
+                    self._chunks_since_connect += 1
+                    latest = raw  # keep for analysis
 
-                    # Auto-start Sonos forwarding on first audio chunk
-                    if not self._sonos_started and self._sonos and self._streamer:
+                    # --- Drain any additional data already in the pipe ---
+                    orig_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                    fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags | os.O_NONBLOCK)
+                    try:
+                        while True:
+                            extra = os.read(fd, CHUNK_BYTES)
+                            if not extra:
+                                break
+                            if self._streamer:
+                                self._streamer.buffer.put(extra)
+                            self._chunks_since_connect += 1
+                            if len(extra) == CHUNK_BYTES:
+                                latest = extra
+                    except BlockingIOError:
+                        pass
+                    finally:
+                        fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags)
+
+                    # --- Pre-buffer then start Sonos forwarding ---
+                    if (not self._sonos_started
+                            and self._sonos and self._streamer
+                            and self._chunks_since_connect >= SONOS_PREBUFFER_CHUNKS):
                         self._sonos_started = True
                         threading.Thread(
                             target=self._start_sonos_forwarding, daemon=True
                         ).start()
 
-                    if self._running and len(raw) == CHUNK_BYTES:
-                        samples = np.frombuffer(raw, dtype=np.int16)
-                        stereo = samples.reshape(-1, 2)
-                        mono = stereo.mean(axis=1).astype(np.float64)
+                    # --- Light show analysis at 30 Hz ---
+                    now = time.time()
+                    if self._running and len(latest) == CHUNK_BYTES:
+                        if now - last_analysis >= LOOP_PERIOD:
+                            last_analysis = now
+                            samples = np.frombuffer(latest, dtype=np.int16)
+                            stereo = samples.reshape(-1, 2)
+                            mono = stereo.mean(axis=1).astype(np.float64)
 
-                        if self.latency_ms > 0:
-                            time.sleep(self.latency_ms / 1000.0)
+                            if self.latency_ms > 0:
+                                time.sleep(self.latency_ms / 1000.0)
 
-                        self._analyze_and_drive(mono)
-
-                        # Maintain 30 Hz analysis rate
-                        elapsed = time.time() - loop_start
-                        sleep_time = LOOP_PERIOD - elapsed
-                        if sleep_time > 0:
-                            time.sleep(sleep_time)
+                            self._analyze_and_drive(mono)
                     elif self._running:
-                        # Incomplete chunk — drive idle pattern
-                        self._drive_idle_pattern()
-                        elapsed = time.time() - loop_start
-                        sleep_time = LOOP_PERIOD - elapsed
-                        if sleep_time > 0:
-                            time.sleep(sleep_time)
-                    # else: not running — data is discarded (drain fast)
+                        if now - last_analysis >= LOOP_PERIOD:
+                            last_analysis = now
+                            self._drive_idle_pattern()
 
             except OSError as exc:
                 logger.debug("Pipe reader: %s, retrying...", exc)
