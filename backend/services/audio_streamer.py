@@ -125,7 +125,7 @@ class AudioBuffer:
 
 
 class _StreamHandler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+    protocol_version = "HTTP/1.0"
     audio_buffer = None
 
     def do_HEAD(self):
@@ -134,9 +134,8 @@ class _StreamHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         self.send_response(200)
-        self.send_header("Content-Type", "audio/x-wav")
+        self.send_header("Content-Type", "audio/wav")
         self.send_header("Accept-Ranges", "none")
-        self.send_header("Connection", "close")
         self.end_headers()
 
     def do_GET(self):
@@ -147,10 +146,8 @@ class _StreamHandler(BaseHTTPRequestHandler):
             return
 
         self.send_response(200)
-        self.send_header("Content-Type", "audio/x-wav")
+        self.send_header("Content-Type", "audio/wav")
         self.send_header("Accept-Ranges", "none")
-        self.send_header("Connection", "close")
-        self.send_header("Cache-Control", "no-cache, no-store")
         self.end_headers()
 
         sid = self.audio_buffer.subscribe()

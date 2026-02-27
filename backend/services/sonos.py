@@ -54,7 +54,7 @@ class SonosService:
             logger.error("Sonos: cannot forward — speaker not found")
             return False
         try:
-            sp.play_uri(stream_url, title="Drewtopia", force_radio=True)
+            sp.play_uri(stream_url, title="Drewtopia")
             self._forwarding = True
             logger.info("Sonos: forwarding audio from %s", stream_url)
             return True
