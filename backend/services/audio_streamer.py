@@ -9,6 +9,7 @@ fetches them over HTTP.
 import logging
 import struct
 import threading
+import time
 from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -78,6 +79,10 @@ class AudioBuffer:
                 return self._buf.popleft()
             return None
 
+    @property
+    def qsize(self):
+        return len(self._buf)
+
     def clear(self):
         with self._cond:
             self._buf.clear()
@@ -98,6 +103,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         """Sonos probes with HEAD before fetching the stream."""
+        logger.info("Stream HEAD from %s:%d", *self.client_address)
         if self.path not in ("/stream", "/stream.wav"):
             self.send_error(404)
             return
@@ -108,6 +114,8 @@ class _StreamHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        logger.info("Stream GET from %s:%d path=%s",
+                     self.client_address[0], self.client_address[1], self.path)
         if self.path not in ("/stream", "/stream.wav"):
             self.send_error(404)
             return
@@ -119,19 +127,23 @@ class _StreamHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, no-store")
         self.end_headers()
 
+        total_bytes = 0
+        silence_bytes = 0
+        writes = 0
         try:
             self.wfile.write(_wav_header())
             self.wfile.flush()
+            total_bytes += 44
 
             while True:
                 # Collect available chunks into a batch to reduce
                 # syscall and TCP overhead (better for Sonos buffering).
                 batch = bytearray()
-                chunk = self.audio_buffer.get(timeout=0.5)
+                chunk = self.audio_buffer.get(timeout=2.0)
                 if chunk is None:
-                    # No data yet — send a small silence block to keep
-                    # the TCP connection alive.
+                    # No data — send silence to keep connection alive.
                     batch.extend(b"\x00" * 4096)
+                    silence_bytes += 4096
                 else:
                     batch.extend(chunk)
                     # Drain up to 10 more queued chunks for this write
@@ -143,11 +155,22 @@ class _StreamHandler(BaseHTTPRequestHandler):
 
                 self.wfile.write(bytes(batch))
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
+                total_bytes += len(batch)
+                writes += 1
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            logger.info("Stream ended for %s:%d after %d bytes "
+                        "(%d silence, %d writes): %s",
+                        self.client_address[0], self.client_address[1],
+                        total_bytes, silence_bytes, writes,
+                        type(exc).__name__)
+        except Exception:
+            logger.exception("Stream unexpected error for %s:%d after %d bytes",
+                             self.client_address[0], self.client_address[1],
+                             total_bytes)
 
     def log_message(self, fmt, *args):
-        logger.debug("AudioStream: %s", fmt % args)
+        # Suppress default access log; we log manually above.
+        pass
 
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
