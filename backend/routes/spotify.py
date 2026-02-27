@@ -1,8 +1,12 @@
 from flask import Blueprint, jsonify, request
 from services.spotify import SpotifyService
+from services.govee_lan import GoveeLanService
+from services.lightshow import LightShowEngine
 
 spotify_bp = Blueprint("spotify", __name__)
 spotify = SpotifyService()
+govee_lan = GoveeLanService()
+lightshow = LightShowEngine(govee_lan)
 
 OAUTH_REDIRECT_URI = "http://10.0.0.74:5000/api/spotify/auth/callback"
 
@@ -106,3 +110,49 @@ def transfer_playback():
         return "", 204
     except Exception as e:
         return jsonify({"error": str(e)}), 502
+
+
+# --- Light Show Endpoints ---
+
+
+@spotify_bp.get("/api/spotify/lightshow/status")
+def lightshow_status():
+    return jsonify(lightshow.get_status())
+
+
+@spotify_bp.post("/api/spotify/lightshow/start")
+def lightshow_start():
+    data = request.get_json() or {}
+    mode = data.get("mode", "pulse")
+    device_ids = data.get("device_ids", [])
+    latency_ms = data.get("latency_ms", 0)
+    intensity = data.get("intensity", 7)
+
+    if not device_ids:
+        return jsonify({"error": "device_ids required (list of Govee device IDs)"}), 400
+    if mode not in ("pulse", "ambient", "party"):
+        return jsonify({"error": "mode must be pulse, ambient, or party"}), 400
+
+    try:
+        lightshow.start(mode, device_ids, latency_ms, intensity)
+        return jsonify(lightshow.get_status())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@spotify_bp.post("/api/spotify/lightshow/stop")
+def lightshow_stop():
+    lightshow.stop()
+    return "", 204
+
+
+@spotify_bp.post("/api/spotify/lightshow/config")
+def lightshow_config():
+    data = request.get_json() or {}
+    if "mode" in data:
+        lightshow.set_mode(data["mode"])
+    if "latency_ms" in data:
+        lightshow.set_latency(data["latency_ms"])
+    if "intensity" in data:
+        lightshow.set_intensity(data["intensity"])
+    return jsonify(lightshow.get_status())
