@@ -20,6 +20,12 @@ const apps = [
     path: "/thermostat",
     icon: "\u{1F321}\u{FE0F}",
   },
+  {
+    name: "Spotify",
+    description: "Music & light show",
+    path: "/spotify",
+    icon: "\u{1F3B5}",
+  },
 ];
 
 export default function Home() {

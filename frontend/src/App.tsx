@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import Lights from "./pages/Lights";
 import Display from "./pages/Display";
 import Thermostat from "./pages/Thermostat";
+import Spotify from "./pages/Spotify";
 import Admin from "./pages/Admin";
 
 function AppRoutes() {
@@ -25,6 +26,7 @@ function AppRoutes() {
       <Route path="/lights" element={user ? <Lights /> : <Navigate to="/" />} />
       <Route path="/display" element={user ? <Display /> : <Navigate to="/" />} />
       <Route path="/thermostat" element={user ? <Thermostat /> : <Navigate to="/" />} />
+      <Route path="/spotify" element={user ? <Spotify /> : <Navigate to="/" />} />
       <Route path="/admin" element={user?.isAdmin ? <Admin /> : <Navigate to="/" />} />
     </Routes>
   );
