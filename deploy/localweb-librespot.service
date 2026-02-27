@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=pi
 ExecStartPre=/bin/bash -c 'test -p /tmp/librespot-pipe || mkfifo /tmp/librespot-pipe'
-ExecStart=/usr/local/bin/librespot --name Drewtopia --backend pipe --device /tmp/librespot-pipe --bitrate 160 --initial-volume 80 --enable-volume-normalisation
+ExecStart=/usr/local/bin/librespot --name Drewtopia --backend pipe --device /tmp/librespot-pipe --bitrate 160 --volume-ctrl fixed
 Restart=always
 RestartSec=5
 
