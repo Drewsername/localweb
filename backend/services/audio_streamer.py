@@ -22,11 +22,17 @@ STREAM_PORT = 8080
 
 
 def _wav_header():
-    """Build a WAV header for an infinite PCM stream."""
+    """Build a WAV header for an infinite PCM stream.
+
+    Both the RIFF size and data size are kept within signed 32-bit range
+    to avoid parsers that treat them as signed integers.
+    """
     byte_rate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE // 8
     block_align = CHANNELS * BITS_PER_SAMPLE // 8
-    data_size = 0x7FFFFFFF  # large placeholder
-    file_size = data_size + 36
+    # Keep both sizes within signed-int32 range (max 0x7FFFFFFF).
+    # file_size = data_size + 36, so data_size = 0x7FFFFFFF - 36.
+    data_size = 0x7FFFFFDB
+    file_size = 0x7FFFFFFF
     return struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF",
