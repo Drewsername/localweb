@@ -11,6 +11,7 @@ import struct
 import threading
 from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,10 @@ class _StreamHandler(BaseHTTPRequestHandler):
         logger.debug("AudioStream: %s", fmt % args)
 
 
+class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
 class AudioStreamer:
     """Manages the HTTP audio stream server."""
 
@@ -138,7 +143,7 @@ class AudioStreamer:
             return
 
         _StreamHandler.audio_buffer = self.buffer
-        self._server = HTTPServer(("0.0.0.0", STREAM_PORT), _StreamHandler)
+        self._server = _ThreadingHTTPServer(("0.0.0.0", STREAM_PORT), _StreamHandler)
         self._thread = threading.Thread(
             target=self._server.serve_forever, daemon=True
         )
