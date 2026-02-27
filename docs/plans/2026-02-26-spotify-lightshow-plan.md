@@ -431,7 +431,7 @@ from services.spotify import SpotifyService
 spotify_bp = Blueprint("spotify", __name__)
 spotify = SpotifyService()
 
-OAUTH_REDIRECT_URI = "http://localhost:5000/api/spotify/auth/callback"
+OAUTH_REDIRECT_URI = "http://10.0.0.74:5000/api/spotify/auth/callback"
 
 
 @spotify_bp.get("/api/spotify/auth/url")
@@ -1593,5 +1593,5 @@ Open `http://localhost:5000/api/spotify/auth/url` from the Pi itself (or port-fo
 You need to add this redirect URI in your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard):
 
 ```
-http://localhost:5000/api/spotify/auth/callback
+http://10.0.0.74:5000/api/spotify/auth/callback
 ```

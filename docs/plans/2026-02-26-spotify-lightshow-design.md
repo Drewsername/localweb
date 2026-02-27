@@ -46,7 +46,7 @@ The Pi is a Raspberry Pi running Raspbian Stretch with Python 3.9. Every design 
 ### OAuth (Web API)
 - Client ID: `<redacted>`
 - Client Secret: stored in `backend/.env` as `SPOTIFY_CLIENT_SECRET`
-- Redirect URI: `http://localhost:5000/api/spotify/auth/callback`
+- Redirect URI: `http://10.0.0.74:5000/api/spotify/auth/callback`
 - Scopes: `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`
 - Token persistence: `backend/spotify_tokens.json` (same pattern as Nest)
 - Auto-refresh on 401 (same pattern as Nest)
