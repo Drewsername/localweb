@@ -8,12 +8,16 @@ Designed for Raspberry Pi: small FFT (1024 samples), 30 Hz analysis loop,
 throttled to 20 commands/sec per light.
 """
 
-import fcntl
 import logging
 import math
 import os
 import threading
 import time
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # Windows dev mode — pipe reader won't run
 
 import numpy as np
 
@@ -265,22 +269,23 @@ class LightShowEngine:
                     latest = raw  # keep for analysis
 
                     # --- Drain any additional data already in the pipe ---
-                    orig_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-                    fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags | os.O_NONBLOCK)
-                    try:
-                        while True:
-                            extra = os.read(fd, CHUNK_BYTES)
-                            if not extra:
-                                break
-                            if self._streamer:
-                                self._streamer.buffer.put(extra)
-                            self._chunks_since_connect += 1
-                            if len(extra) == CHUNK_BYTES:
-                                latest = extra
-                    except BlockingIOError:
-                        pass
-                    finally:
-                        fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags)
+                    if fcntl is not None:
+                        orig_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                        fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags | os.O_NONBLOCK)
+                        try:
+                            while True:
+                                extra = os.read(fd, CHUNK_BYTES)
+                                if not extra:
+                                    break
+                                if self._streamer:
+                                    self._streamer.buffer.put(extra)
+                                self._chunks_since_connect += 1
+                                if len(extra) == CHUNK_BYTES:
+                                    latest = extra
+                        except BlockingIOError:
+                            pass
+                        finally:
+                            fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags)
 
                     # --- Pre-buffer then start Sonos forwarding ---
                     if (not self._sonos_started
