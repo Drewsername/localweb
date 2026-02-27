@@ -4,6 +4,8 @@ from services.govee_lan import GoveeLanService
 from services.audio_streamer import AudioStreamer
 from services.sonos import SonosService
 from services.lightshow import LightShowEngine
+from routes.users import admin_required
+from services.presence import trigger_arrival_music
 
 spotify_bp = Blueprint("spotify", __name__)
 spotify = SpotifyService()
@@ -193,3 +195,29 @@ def lightshow_config():
     if "intensity" in data:
         lightshow.set_intensity(data["intensity"])
     return jsonify(lightshow.get_status())
+
+
+# --- Arrival Music Endpoints ---
+
+
+@spotify_bp.get("/api/spotify/playlists")
+@admin_required
+def list_playlists():
+    if not spotify.is_authenticated:
+        return jsonify({"error": "Not authorized"}), 401
+    try:
+        return jsonify(spotify.get_playlists())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@spotify_bp.post("/api/spotify/arrival/test")
+@admin_required
+def test_arrival_music():
+    if not spotify.is_authenticated:
+        return jsonify({"error": "Not authorized"}), 401
+    try:
+        result = trigger_arrival_music(spotify)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502

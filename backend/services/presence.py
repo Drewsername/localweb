@@ -15,17 +15,63 @@ WELCOME_DURATION = 60  # seconds before switching to dashboard
 REWELCOME_COOLDOWN = 300  # seconds — don't re-welcome same user within 5 min
 
 
+def trigger_arrival_music(spotify_service):
+    """Start arrival playlist on Spotify. Returns result dict for logging."""
+    db = get_db()
+    try:
+        # Find Drew's user ID
+        drew = db.execute("SELECT id FROM users WHERE LOWER(name) = 'drew'").fetchone()
+        if not drew:
+            return {"skipped": True, "reason": "drew user not found"}
+
+        # Read arrival settings
+        rows = db.execute(
+            "SELECT key, value FROM user_settings WHERE user_id = ? AND namespace = 'spotify.arrival'",
+            (drew["id"],),
+        ).fetchall()
+        settings = {r["key"]: json.loads(r["value"]) for r in rows}
+
+        if not settings.get("enabled"):
+            return {"skipped": True, "reason": "arrival music disabled"}
+        playlist_uri = settings.get("playlist_uri", "")
+        if not playlist_uri:
+            return {"skipped": True, "reason": "no playlist configured"}
+
+        shuffle = settings.get("shuffle", True)
+
+        # Find target device — prefer "Drewtopia", fall back to first available
+        devices = spotify_service.get_devices()
+        device_id = None
+        for d in devices:
+            if d["name"].lower() == "drewtopia":
+                device_id = d["id"]
+                break
+        if not device_id and devices:
+            device_id = devices[0]["id"]
+
+        # Set shuffle then start playback
+        try:
+            spotify_service.set_shuffle(shuffle)
+        except Exception:
+            pass  # shuffle may fail if no active device yet
+        spotify_service.play_context(playlist_uri, device_id=device_id)
+        return {"ok": True, "device": device_id, "playlist": playlist_uri, "shuffle": shuffle}
+    finally:
+        db.close()
+
+
 class PresenceScanner:
-    def __init__(self, eink=None, govee=None, nest=None):
+    def __init__(self, eink=None, govee=None, nest=None, spotify=None):
         self.eink = eink
         self.govee = govee
         self.nest = nest
+        self.spotify = spotify
         self._thread = None
         self._running = False
         self._welcome_timer = None
         self._showing_welcome = False
         self._last_dashboard_users = None  # track displayed home list
-        self._last_welcome_name = None
+        self._last_welcome_names = None  # set of recently-welcomed names
         self._last_welcome_time = None
 
     def start(self):
@@ -191,10 +237,9 @@ class PresenceScanner:
 
             db.commit()
 
-            # Handle arrivals — most recent arrival wins
+            # Handle arrivals — welcome all who arrived this scan
             if newly_arrived:
-                latest = newly_arrived[-1]
-                self._on_arrival(latest, db)
+                self._on_arrival(newly_arrived, db)
             elif someone_departed and not self._showing_welcome:
                 # Someone left — refresh dashboard
                 self.show_dashboard()
@@ -202,19 +247,26 @@ class PresenceScanner:
         finally:
             db.close()
 
-    def _on_arrival(self, user, db):
-        """Handle a user arriving home."""
-        name = user["name"]
+    def _on_arrival(self, users, db):
+        """Handle one or more users arriving home."""
         now = time.time()
 
-        # Skip re-welcome if same user just arrived recently (phone oscillation)
-        if (
-            self._last_welcome_name == name
-            and self._last_welcome_time
-            and now - self._last_welcome_time < REWELCOME_COOLDOWN
-        ):
-            # Silently mark as home, update dashboard without welcome fanfare
-            self._last_dashboard_users = None  # force dashboard refresh
+        # Filter out recently-welcomed users (phone oscillation prevention)
+        new_arrivals = []
+        for user in users:
+            name = user["name"]
+            if (
+                self._last_welcome_names
+                and name in self._last_welcome_names
+                and self._last_welcome_time
+                and now - self._last_welcome_time < REWELCOME_COOLDOWN
+            ):
+                continue
+            new_arrivals.append(user)
+
+        if not new_arrivals:
+            # All users were recently welcomed — just refresh dashboard
+            self._last_dashboard_users = None
             if not self._showing_welcome:
                 self.show_dashboard()
             return
@@ -223,37 +275,47 @@ class PresenceScanner:
         if self._welcome_timer:
             self._welcome_timer.cancel()
 
-        # Show welcome screen
+        # Show welcome screen with all new arrival names
+        names = [u["name"] for u in new_arrivals]
         from drivers.eink import render_welcome
         self._showing_welcome = True
-        self._last_welcome_name = name
+        self._last_welcome_names = set(names)
         self._last_welcome_time = now
-        self._update_display(render_welcome(name))
+        self._update_display(render_welcome(names))
 
         # After WELCOME_DURATION seconds, switch to dashboard
         self._welcome_timer = threading.Timer(WELCOME_DURATION, self.show_dashboard)
         self._welcome_timer.daemon = True
         self._welcome_timer.start()
 
-        # Apply user's Govee settings
-        if self.govee:
+        # Apply each arriving user's Govee settings
+        for user in new_arrivals:
+            if self.govee:
+                try:
+                    rows = db.execute(
+                        "SELECT namespace, key, value FROM user_settings WHERE user_id = ? AND namespace LIKE 'govee.%'",
+                        (user["id"],),
+                    ).fetchall()
+
+                    settings = {}
+                    for r in rows:
+                        ns = r["namespace"]
+                        if ns not in settings:
+                            settings[ns] = {}
+                        settings[ns][r["key"]] = json.loads(r["value"])
+
+                    if settings:
+                        self.govee.apply_user_settings(settings)
+                except Exception as e:
+                    print(f"Failed to apply settings for {user['name']}: {e}")
+
+        # Trigger arrival music for Drew
+        if self.spotify and any(u["name"].lower() == "drew" for u in new_arrivals):
             try:
-                rows = db.execute(
-                    "SELECT namespace, key, value FROM user_settings WHERE user_id = ? AND namespace LIKE 'govee.%'",
-                    (user["id"],),
-                ).fetchall()
-
-                settings = {}
-                for r in rows:
-                    ns = r["namespace"]
-                    if ns not in settings:
-                        settings[ns] = {}
-                    settings[ns][r["key"]] = json.loads(r["value"])
-
-                if settings:
-                    self.govee.apply_user_settings(settings)
+                result = trigger_arrival_music(self.spotify)
+                print(f"Arrival music: {result}")
             except Exception as e:
-                print(f"Failed to apply settings for {name}: {e}")
+                print(f"Arrival music failed: {e}")
 
         # Apply optimal Nest temperature based on all home users
         if self.nest:

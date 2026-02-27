@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
+import { useUser } from "../context/UserContext";
 
 // --- Types ---
 
@@ -46,9 +47,177 @@ function formatTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+interface SpotifyPlaylist {
+  uri: string;
+  name: string;
+  image_url: string | null;
+}
+
+// --- Arrival Music Settings (admin only) ---
+
+function ArrivalMusicSettings({ onReconnect }: { onReconnect: () => void }) {
+  const [enabled, setEnabled] = useState(false);
+  const [playlistUri, setPlaylistUri] = useState("");
+  const [playlistName, setPlaylistName] = useState("");
+  const [shuffle, setShuffle] = useState(true);
+  const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [playlistsError, setPlaylistsError] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // Load settings + playlists on mount
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        const arrival = data["spotify.arrival"] || {};
+        setEnabled(!!arrival.enabled);
+        setPlaylistUri(arrival.playlist_uri || "");
+        setPlaylistName(arrival.playlist_name || "");
+        setShuffle(arrival.shuffle !== undefined ? !!arrival.shuffle : true);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+
+    fetch("/api/spotify/playlists")
+      .then((r) => {
+        if (!r.ok) throw new Error("failed");
+        return r.json();
+      })
+      .then((data) => setPlaylists(data))
+      .catch(() => setPlaylistsError(true));
+  }, []);
+
+  function saveSetting(updates: Record<string, unknown>) {
+    fetch("/api/settings/spotify.arrival", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    }).catch(() => {});
+  }
+
+  function handleToggleEnabled() {
+    const next = !enabled;
+    setEnabled(next);
+    saveSetting({ enabled: next });
+  }
+
+  function handlePlaylistChange(uri: string) {
+    const pl = playlists.find((p) => p.uri === uri);
+    setPlaylistUri(uri);
+    setPlaylistName(pl?.name || "");
+    saveSetting({ playlist_uri: uri, playlist_name: pl?.name || "" });
+  }
+
+  function handleToggleShuffle() {
+    const next = !shuffle;
+    setShuffle(next);
+    saveSetting({ shuffle: next });
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      await fetch("/api/spotify/arrival/test", { method: "POST" });
+    } catch {
+      /* ignore */
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <div className="p-5 bg-gray-900 border border-gray-800 rounded-xl space-y-5">
+      <h2 className="text-lg font-semibold">Arrival Music</h2>
+
+      {playlistsError ? (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-400">
+            Could not load playlists. Spotify may need to be re-authorized with updated permissions.
+          </p>
+          <button
+            onClick={onReconnect}
+            className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            Re-authorize Spotify
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-300">Enable</span>
+            <button
+              onClick={handleToggleEnabled}
+              className={`relative w-14 h-8 rounded-full transition-colors ${
+                enabled ? "bg-green-600" : "bg-gray-700"
+              }`}
+            >
+              <span
+                className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-transform ${
+                  enabled ? "translate-x-6" : ""
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Playlist dropdown */}
+          <div className="space-y-2">
+            <label className="text-sm text-gray-400">Playlist</label>
+            <select
+              value={playlistUri}
+              onChange={(e) => handlePlaylistChange(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:border-green-600 focus:outline-none"
+            >
+              <option value="">Select a playlist...</option>
+              {playlists.map((pl) => (
+                <option key={pl.uri} value={pl.uri}>
+                  {pl.name}
+                </option>
+              ))}
+            </select>
+            {playlistName && !playlists.find((p) => p.uri === playlistUri) && (
+              <p className="text-xs text-gray-500">Currently: {playlistName}</p>
+            )}
+          </div>
+
+          {/* Shuffle toggle */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-300">Shuffle</span>
+            <button
+              onClick={handleToggleShuffle}
+              className={`relative w-14 h-8 rounded-full transition-colors ${
+                shuffle ? "bg-green-600" : "bg-gray-700"
+              }`}
+            >
+              <span
+                className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-transform ${
+                  shuffle ? "translate-x-6" : ""
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Test button */}
+          <button
+            onClick={handleTest}
+            disabled={testing || !playlistUri}
+            className="w-full py-3 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
+          >
+            {testing ? "Starting..." : "Test Arrival Music"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Component ---
 
 export default function Spotify() {
+  const { user } = useUser();
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [nothingPlaying, setNothingPlaying] = useState(false);
@@ -64,6 +233,7 @@ export default function Spotify() {
   const [sonosVolume, setSonosVolume] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const skipPollUntil = useRef(0);
   const intensityTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latencyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const volumeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -99,7 +269,10 @@ export default function Spotify() {
   useEffect(() => {
     if (!authenticated) return;
     fetchNowPlaying();
-    pollRef.current = setInterval(fetchNowPlaying, 3000);
+    pollRef.current = setInterval(() => {
+      if (Date.now() < skipPollUntil.current) return;
+      fetchNowPlaying();
+    }, 3000);
     return () => clearInterval(pollRef.current);
   }, [authenticated, fetchNowPlaying]);
 
@@ -174,23 +347,28 @@ export default function Spotify() {
   async function handlePlayPause() {
     if (!nowPlaying) return;
     const endpoint = nowPlaying.is_playing ? "/api/spotify/pause" : "/api/spotify/play";
-    // Optimistic update
+    // Optimistic update — suppress polls so stale API data doesn't revert it
     setNowPlaying((prev) => (prev ? { ...prev, is_playing: !prev.is_playing } : prev));
+    skipPollUntil.current = Date.now() + 3000;
     try {
-      await fetch(endpoint, { method: "POST" });
-      await fetchNowPlaying();
+      const res = await fetch(endpoint, { method: "POST" });
+      if (!res.ok) {
+        // Revert — the command actually failed
+        setNowPlaying((prev) => (prev ? { ...prev, is_playing: !prev.is_playing } : prev));
+        skipPollUntil.current = 0;
+      }
     } catch {
-      // Revert on failure
       setNowPlaying((prev) => (prev ? { ...prev, is_playing: !prev.is_playing } : prev));
+      skipPollUntil.current = 0;
     }
   }
 
   async function handlePrevious() {
     setActionPending(true);
+    skipPollUntil.current = Date.now() + 2000;
     try {
       await fetch("/api/spotify/previous", { method: "POST" });
-      // Small delay to let Spotify update
-      setTimeout(fetchNowPlaying, 300);
+      setTimeout(fetchNowPlaying, 1000);
     } catch {
       /* ignore */
     } finally {
@@ -200,9 +378,10 @@ export default function Spotify() {
 
   async function handleNext() {
     setActionPending(true);
+    skipPollUntil.current = Date.now() + 2000;
     try {
       await fetch("/api/spotify/next", { method: "POST" });
-      setTimeout(fetchNowPlaying, 300);
+      setTimeout(fetchNowPlaying, 1000);
     } catch {
       /* ignore */
     } finally {
@@ -694,6 +873,11 @@ export default function Spotify() {
             </p>
           )}
         </div>
+
+        {/* Arrival Music Settings (admin only) */}
+        {user?.isAdmin && authenticated && (
+          <ArrivalMusicSettings onReconnect={handleConnectSpotify} />
+        )}
       </div>
     </div>
   );

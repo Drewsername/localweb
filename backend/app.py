@@ -97,8 +97,9 @@ if __name__ == "__main__":
     from services.presence import PresenceScanner
     from routes.govee import govee
     from routes.nest import nest
+    from routes.spotify import spotify
 
-    scanner = PresenceScanner(eink=eink, govee=govee, nest=nest)
+    scanner = PresenceScanner(eink=eink, govee=govee, nest=nest, spotify=spotify)
     scanner.start()
 
     # Show dashboard on startup (shows who's currently home)

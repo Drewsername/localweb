@@ -7,7 +7,7 @@ AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_BASE = "https://api.spotify.com/v1"
 TOKEN_FILE = os.path.join(os.path.dirname(__file__), "..", "spotify_tokens.json")
-SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private"
 
 
 class SpotifyService:
@@ -147,3 +147,24 @@ class SpotifyService:
     def transfer_playback(self, device_id):
         """PUT /me/player -- transfer playback to a device."""
         return self._request("PUT", "/me/player", json={"device_ids": [device_id]})
+
+    def get_playlists(self, limit=50):
+        """GET /me/playlists -- return list of {uri, name, image_url}."""
+        data = self._request("GET", f"/me/playlists?limit={limit}")
+        playlists = []
+        for item in data.get("items", []):
+            playlists.append({
+                "uri": item["uri"],
+                "name": item["name"],
+                "image_url": item["images"][0]["url"] if item.get("images") else None,
+            })
+        return playlists
+
+    def set_shuffle(self, state: bool):
+        """PUT /me/player/shuffle -- set shuffle on or off."""
+        return self._request("PUT", f"/me/player/shuffle?state={'true' if state else 'false'}")
+
+    def play_context(self, context_uri, device_id=None):
+        """PUT /me/player/play -- start playback of a context (playlist/album)."""
+        params = f"?device_id={device_id}" if device_id else ""
+        return self._request("PUT", f"/me/player/play{params}", json={"context_uri": context_uri})
