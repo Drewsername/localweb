@@ -72,6 +72,8 @@ class AudioBuffer:
     def put(self, chunk: bytes):
         with self._lock:
             for i, q in enumerate(self._subscribers):
+                if q is None:
+                    continue
                 q.append(chunk)
                 with self._conds[i]:
                     self._conds[i].notify_all()
@@ -79,7 +81,8 @@ class AudioBuffer:
     def clear(self):
         with self._lock:
             for q in self._subscribers:
-                q.clear()
+                if q is not None:
+                    q.clear()
 
     # -- consumer API (called by HTTP handlers) --
 
