@@ -2,6 +2,8 @@ import os
 import uuid
 import requests
 
+from services.govee_lan import GoveeLanService
+
 GOVEE_BASE = "https://openapi.api.govee.com"
 
 
@@ -9,6 +11,7 @@ class GoveeService:
     def __init__(self):
         self.api_key = os.environ.get("GOVEE_API_KEY", "")
         self._devices_cache = None
+        self.lan = GoveeLanService()
 
     @property
     def headers(self):
@@ -38,7 +41,18 @@ class GoveeService:
         return None
 
     def get_device_state(self, device_id):
-        """POST /router/api/v1/device/state — get current device state."""
+        """Get current device state, trying LAN first then cloud API."""
+        # --- LAN attempt ---
+        try:
+            ip = self.lan.get_device_ip(device_id)
+            if ip:
+                lan_resp = self.lan.get_status(ip)
+                if lan_resp is not None:
+                    return self._lan_state_to_cloud_format(lan_resp)
+        except Exception as e:
+            print(f"[govee] LAN state query failed for {device_id}, falling back to cloud: {e}")
+
+        # --- Cloud fallback ---
         device = self._find_device(device_id)
         if not device:
             return None
@@ -57,12 +71,92 @@ class GoveeService:
         resp.raise_for_status()
         return resp.json().get("payload", {})
 
+    @staticmethod
+    def _lan_state_to_cloud_format(lan_resp):
+        """Convert a LAN devStatus response to cloud-style capabilities list.
+
+        LAN response shape:
+            {"msg": {"cmd": "devStatus", "data": {
+                "onOff": 1, "brightness": 100,
+                "color": {"r": 255, "g": 0, "b": 0},
+                "colorTemInKelvin": 0
+            }}}
+
+        Cloud format:
+            {"capabilities": [
+                {"type": "devices.capabilities.on_off",
+                 "instance": "powerSwitch", "state": {"value": 1}},
+                ...
+            ]}
+        """
+        data = lan_resp.get("msg", {}).get("data", {})
+        capabilities = []
+
+        if "onOff" in data:
+            capabilities.append({
+                "type": "devices.capabilities.on_off",
+                "instance": "powerSwitch",
+                "state": {"value": data["onOff"]},
+            })
+
+        if "brightness" in data:
+            capabilities.append({
+                "type": "devices.capabilities.range",
+                "instance": "brightness",
+                "state": {"value": data["brightness"]},
+            })
+
+        if "color" in data:
+            c = data["color"]
+            rgb_int = (c.get("r", 0) << 16) | (c.get("g", 0) << 8) | c.get("b", 0)
+            capabilities.append({
+                "type": "devices.capabilities.color_setting",
+                "instance": "colorRgb",
+                "state": {"value": rgb_int},
+            })
+
+        if "colorTemInKelvin" in data:
+            capabilities.append({
+                "type": "devices.capabilities.color_setting",
+                "instance": "colorTemperatureK",
+                "state": {"value": data["colorTemInKelvin"]},
+            })
+
+        return {"capabilities": capabilities}
+
     def control_device(self, device_id, capability):
-        """POST /router/api/v1/device/control — send a control command.
+        """Send a control command, trying LAN first then cloud API.
 
         capability should be a dict with: type, instance, value
         e.g. {"type": "devices.capabilities.on_off", "instance": "powerSwitch", "value": 1}
         """
+        instance = capability.get("instance", "")
+        value = capability.get("value")
+
+        # --- LAN attempt ---
+        try:
+            ip = self.lan.get_device_ip(device_id)
+            if ip:
+                if instance == "powerSwitch":
+                    self.lan.turn(ip, bool(value))
+                    return {"ok": True, "via": "lan"}
+                elif instance == "brightness":
+                    self.lan.set_brightness(ip, value)
+                    return {"ok": True, "via": "lan"}
+                elif instance == "colorRgb":
+                    r = (value >> 16) & 0xFF
+                    g = (value >> 8) & 0xFF
+                    b = value & 0xFF
+                    self.lan.set_color(ip, r, g, b)
+                    return {"ok": True, "via": "lan"}
+                elif instance == "colorTemperatureK":
+                    self.lan.set_color_temp(ip, value)
+                    return {"ok": True, "via": "lan"}
+                # For unrecognized instances (e.g. dynamic_scene), fall through to cloud
+        except Exception as e:
+            print(f"[govee] LAN control failed for {device_id}, falling back to cloud: {e}")
+
+        # --- Cloud fallback ---
         device = self._find_device(device_id)
         if not device:
             return None
