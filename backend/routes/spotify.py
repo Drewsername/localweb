@@ -8,7 +8,7 @@ spotify = SpotifyService()
 govee_lan = GoveeLanService()
 lightshow = LightShowEngine(govee_lan)
 
-OAUTH_REDIRECT_URI = "http://10.0.0.74:5000/api/spotify/auth/callback"
+OAUTH_REDIRECT_URI = "https://10.0.0.74/api/spotify/auth/callback"
 
 
 @spotify_bp.get("/api/spotify/auth/url")
