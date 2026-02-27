@@ -74,3 +74,28 @@ class SonosService:
         except Exception:
             logger.exception("Sonos: failed to stop forwarding")
         self._forwarding = False
+
+    def get_volume(self):
+        """Return the current Sonos volume (0-100)."""
+        sp = self.speaker
+        if sp is None:
+            return None
+        try:
+            return sp.volume
+        except Exception:
+            logger.exception("Sonos: failed to get volume")
+            return None
+
+    def set_volume(self, level):
+        """Set Sonos volume (0-100)."""
+        sp = self.speaker
+        if sp is None:
+            return False
+        level = max(0, min(100, int(level)))
+        try:
+            sp.volume = level
+            logger.info("Sonos: volume set to %d", level)
+            return True
+        except Exception:
+            logger.exception("Sonos: failed to set volume")
+            return False

@@ -53,6 +53,11 @@ LOOP_PERIOD = 1.0 / 30   # ~33ms for 30 Hz analysis loop
 # it has data immediately when it connects (~0.5 s at 44100 Hz).
 SONOS_PREBUFFER_CHUNKS = 20
 
+# -- Grace period for track transitions ------------------------------------
+# When librespot closes the pipe (e.g. between tracks), wait this long for
+# it to reconnect before stopping Sonos forwarding.
+PIPE_GRACE_PERIOD = 8.0  # seconds
+
 # -- Light show defaults ----------------------------------------------------
 WARM_WHITE = (255, 180, 100)
 WARM_WHITE_BRIGHTNESS = 50
@@ -227,6 +232,66 @@ class LightShowEngine:
     # Persistent pipe reader
     # ------------------------------------------------------------------
 
+    def _read_pipe(self, fd):
+        """Read from an open pipe fd until EOF or error.
+
+        Returns normally on EOF.  Raises OSError on pipe errors.
+        """
+        last_analysis = 0.0
+        while True:
+            raw = os.read(fd, CHUNK_BYTES)
+            if not raw:
+                return  # EOF — writer closed
+
+            if self._streamer:
+                self._streamer.buffer.put(raw)
+            self._chunks_since_connect += 1
+            latest = raw
+
+            # Drain any additional data already in the pipe
+            if fcntl is not None:
+                orig_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags | os.O_NONBLOCK)
+                try:
+                    while True:
+                        extra = os.read(fd, CHUNK_BYTES)
+                        if not extra:
+                            break
+                        if self._streamer:
+                            self._streamer.buffer.put(extra)
+                        self._chunks_since_connect += 1
+                        if len(extra) == CHUNK_BYTES:
+                            latest = extra
+                except BlockingIOError:
+                    pass
+                finally:
+                    fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags)
+
+            # Pre-buffer then start Sonos forwarding
+            if (not self._sonos_started
+                    and self._sonos and self._streamer
+                    and self._chunks_since_connect >= SONOS_PREBUFFER_CHUNKS):
+                self._sonos_started = True
+                threading.Thread(
+                    target=self._start_sonos_forwarding, daemon=True
+                ).start()
+
+            # Light show analysis at 30 Hz
+            now = time.time()
+            if self._running and len(latest) == CHUNK_BYTES:
+                if now - last_analysis >= LOOP_PERIOD:
+                    last_analysis = now
+                    samples = np.frombuffer(latest, dtype=np.int16)
+                    stereo = samples.reshape(-1, 2)
+                    mono = stereo.mean(axis=1).astype(np.float64)
+                    if self.latency_ms > 0:
+                        time.sleep(self.latency_ms / 1000.0)
+                    self._analyze_and_drive(mono)
+            elif self._running:
+                if now - last_analysis >= LOOP_PERIOD:
+                    last_analysis = now
+                    self._drive_idle_pattern()
+
     def _persistent_pipe_reader(self):
         """Always drain the audio pipe so librespot never blocks.
 
@@ -235,9 +300,10 @@ class LightShowEngine:
         buffer so the speaker can play it.  The thread runs for the
         lifetime of the process.
 
-        The pipe is always drained at full speed to prevent back-pressure
-        on librespot.  Light-show analysis runs at 30 Hz on the most
-        recent chunk; all other chunks are forwarded to Sonos without delay.
+        When the pipe closes (e.g. between tracks), the reader waits up to
+        PIPE_GRACE_PERIOD seconds for librespot to reconnect before
+        stopping Sonos forwarding.  This keeps the stream alive during
+        track transitions.
         """
         while True:
             if not os.path.exists(PIPE_PATH):
@@ -247,92 +313,77 @@ class LightShowEngine:
                 continue
 
             fd = None
+            is_first_connect = not self._sonos_started
             try:
-                # Blocking open — waits until librespot opens the write end
                 fd = os.open(PIPE_PATH, os.O_RDONLY)
                 self._audio_connected = True
-                self._sonos_started = False
                 self._chunks_since_connect = 0
-                # Flush stale audio from previous session so Sonos
-                # doesn't play leftover data from a prior track.
-                if self._streamer:
-                    self._streamer.buffer.clear()
-                logger.info("Pipe reader: connected to %s", PIPE_PATH)
 
-                last_analysis = 0.0
-
-                while True:
-                    # --- Blocking read of one chunk ---
-                    raw = os.read(fd, CHUNK_BYTES)
-                    if not raw:
-                        break
-
+                if is_first_connect:
                     if self._streamer:
-                        self._streamer.buffer.put(raw)
-                    self._chunks_since_connect += 1
-                    latest = raw  # keep for analysis
+                        self._streamer.buffer.clear()
+                    logger.info("Pipe reader: connected to %s", PIPE_PATH)
+                else:
+                    logger.info("Pipe reader: reconnected (track transition)")
 
-                    # --- Drain any additional data already in the pipe ---
-                    if fcntl is not None:
-                        orig_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-                        fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags | os.O_NONBLOCK)
-                        try:
-                            while True:
-                                extra = os.read(fd, CHUNK_BYTES)
-                                if not extra:
-                                    break
-                                if self._streamer:
-                                    self._streamer.buffer.put(extra)
-                                self._chunks_since_connect += 1
-                                if len(extra) == CHUNK_BYTES:
-                                    latest = extra
-                        except BlockingIOError:
-                            pass
-                        finally:
-                            fcntl.fcntl(fd, fcntl.F_SETFL, orig_flags)
-
-                    # --- Pre-buffer then start Sonos forwarding ---
-                    if (not self._sonos_started
-                            and self._sonos and self._streamer
-                            and self._chunks_since_connect >= SONOS_PREBUFFER_CHUNKS):
-                        self._sonos_started = True
-                        threading.Thread(
-                            target=self._start_sonos_forwarding, daemon=True
-                        ).start()
-
-                    # --- Light show analysis at 30 Hz ---
-                    now = time.time()
-                    if self._running and len(latest) == CHUNK_BYTES:
-                        if now - last_analysis >= LOOP_PERIOD:
-                            last_analysis = now
-                            samples = np.frombuffer(latest, dtype=np.int16)
-                            stereo = samples.reshape(-1, 2)
-                            mono = stereo.mean(axis=1).astype(np.float64)
-
-                            if self.latency_ms > 0:
-                                time.sleep(self.latency_ms / 1000.0)
-
-                            self._analyze_and_drive(mono)
-                    elif self._running:
-                        if now - last_analysis >= LOOP_PERIOD:
-                            last_analysis = now
-                            self._drive_idle_pattern()
+                self._read_pipe(fd)
 
             except OSError as exc:
                 logger.debug("Pipe reader: %s, retrying...", exc)
             finally:
                 self._audio_connected = False
-                if self._sonos_started and self._sonos:
-                    self._sonos.stop_forwarding()
-                    self._sonos_started = False
                 if fd is not None:
                     try:
                         os.close(fd)
                     except OSError:
                         pass
+                    fd = None
 
-            # Brief pause before reconnecting
-            time.sleep(1.0)
+            # --- Grace period: keep Sonos alive during track transitions ---
+            if not self._sonos_started:
+                time.sleep(1.0)
+                continue
+
+            logger.info("Pipe reader: pipe closed, waiting %.0fs for reconnect",
+                        PIPE_GRACE_PERIOD)
+            deadline = time.time() + PIPE_GRACE_PERIOD
+            while time.time() < deadline:
+                if not os.path.exists(PIPE_PATH):
+                    time.sleep(0.3)
+                    continue
+                try:
+                    fd = os.open(PIPE_PATH, os.O_RDONLY | os.O_NONBLOCK)
+                    if fcntl is not None:
+                        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                        fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+                    break
+                except OSError:
+                    time.sleep(0.3)
+
+            if fd is not None:
+                # Reconnected within grace period
+                self._audio_connected = True
+                self._chunks_since_connect = 0
+                logger.info("Pipe reader: reconnected within grace period")
+                try:
+                    self._read_pipe(fd)
+                except OSError:
+                    pass
+                finally:
+                    self._audio_connected = False
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                    fd = None
+                # Pipe closed again — loop back to check grace period
+                continue
+
+            # Grace period expired — stop Sonos
+            logger.info("Pipe reader: grace period expired, stopping Sonos")
+            if self._sonos:
+                self._sonos.stop_forwarding()
+            self._sonos_started = False
 
     def _start_sonos_forwarding(self):
         """Tell the Sonos speaker to play from our audio stream (background)."""

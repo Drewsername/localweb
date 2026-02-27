@@ -164,6 +164,25 @@ def lightshow_stop():
     return "", 204
 
 
+@spotify_bp.get("/api/spotify/sonos/volume")
+def sonos_volume_get():
+    vol = sonos.get_volume()
+    if vol is None:
+        return jsonify({"error": "Speaker not available"}), 503
+    return jsonify({"volume": vol})
+
+
+@spotify_bp.post("/api/spotify/sonos/volume")
+def sonos_volume_set():
+    data = request.get_json() or {}
+    level = data.get("volume")
+    if level is None:
+        return jsonify({"error": "volume required"}), 400
+    if sonos.set_volume(level):
+        return jsonify({"volume": max(0, min(100, int(level)))})
+    return jsonify({"error": "Speaker not available"}), 503
+
+
 @spotify_bp.post("/api/spotify/lightshow/config")
 def lightshow_config():
     data = request.get_json() or {}

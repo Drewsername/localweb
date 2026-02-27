@@ -61,10 +61,12 @@ export default function Spotify() {
   const [latency, setLatency] = useState(0);
   const [lightShowStatus, setLightShowStatus] = useState<LightShowStatus | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [sonosVolume, setSonosVolume] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const intensityTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latencyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const volumeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // --- Auth check ---
 
@@ -140,6 +142,32 @@ export default function Spotify() {
       })
       .catch(() => {});
   }, [authenticated, fetchLightShowStatus]);
+
+  // --- Sonos volume ---
+
+  useEffect(() => {
+    if (!authenticated) return;
+    fetch("/api/spotify/sonos/volume")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setSonosVolume(d.volume); })
+      .catch(() => {});
+  }, [authenticated]);
+
+  function handleVolumeChange(value: number) {
+    setSonosVolume(value);
+    clearTimeout(volumeTimer.current);
+    volumeTimer.current = setTimeout(async () => {
+      try {
+        await fetch("/api/spotify/sonos/volume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ volume: value }),
+        });
+      } catch {
+        /* ignore */
+      }
+    }, 150);
+  }
 
   // --- Playback controls ---
 
@@ -498,6 +526,22 @@ export default function Spotify() {
                   &#x23ED;
                 </button>
               </div>
+
+              {/* Volume slider */}
+              {sonosVolume !== null && (
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-400 text-xs">Vol</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={sonosVolume}
+                    onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                    className="flex-1 accent-green-600"
+                  />
+                  <span className="text-xs text-gray-400 w-7 text-right">{sonosVolume}</span>
+                </div>
+              )}
 
               {/* Device selector */}
               <div className="pt-2 border-t border-gray-800">
