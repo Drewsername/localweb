@@ -52,6 +52,10 @@ VALID_MODES = ("pulse", "ambient", "party")
 class LightShowEngine:
     """Drives Govee lights reactively based on audio analysis.
 
+    A persistent pipe reader thread always drains librespot's named pipe so
+    playback never stalls.  When a show is active the audio is analysed and
+    used to drive lights; otherwise the data is simply discarded.
+
     Usage:
         engine = LightShowEngine(govee_lan_service)
         engine.start(mode="pulse", device_ids=["AA:BB:...", "CC:DD:..."])
@@ -62,7 +66,6 @@ class LightShowEngine:
     def __init__(self, govee_lan):
         self._govee = govee_lan
         self._running = False
-        self._thread = None
         self._lock = threading.Lock()
 
         # Configuration (mutable at runtime via setters)
@@ -81,6 +84,14 @@ class LightShowEngine:
         self._phase = 0.0  # phase accumulator for ambient mode
         self._beat_count = 0  # total beats detected (for party alternation)
         self._last_rms = 0.0
+        self._audio_connected = False  # True when pipe reader has a live fd
+
+        # Start persistent pipe reader (keeps pipe drained so librespot
+        # never blocks, and feeds audio to analysis when show is active)
+        self._pipe_thread = threading.Thread(
+            target=self._persistent_pipe_reader, daemon=True
+        )
+        self._pipe_thread.start()
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,7 +117,6 @@ class LightShowEngine:
         if self._running:
             self.stop()
 
-        self.mode = mode
         self.latency_ms = max(0, int(latency_ms))
         self.intensity = max(1, min(10, int(intensity)))
         self._device_ids = list(device_ids)
@@ -139,18 +149,15 @@ class LightShowEngine:
         self._beat_count = 0
         self._last_rms = 0.0
 
-        # Start background thread
+        # Activate — the persistent pipe reader will begin analysis
+        with self._lock:
+            self.mode = mode
         self._running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
         logger.info("Light show started: mode=%s, lights=%d", mode, len(self._light_ips))
 
     def stop(self):
         """Stop the light show and reset lights to warm white."""
         self._running = False
-        if self._thread is not None:
-            self._thread.join(timeout=3.0)
-            self._thread = None
 
         # Reset lights to warm white
         for ip in self._light_ips:
@@ -162,7 +169,8 @@ class LightShowEngine:
                 except Exception:
                     logger.exception("Failed to reset light at %s", ip)
 
-        self.mode = "off"
+        with self._lock:
+            self.mode = "off"
         logger.info("Light show stopped")
 
     def set_mode(self, mode):
@@ -194,80 +202,79 @@ class LightShowEngine:
             "intensity": self.intensity,
             "lights_connected": sum(1 for ip in self._light_ips if ip),
             "pipe_exists": os.path.exists(PIPE_PATH),
+            "audio_connected": self._audio_connected,
         }
 
     # ------------------------------------------------------------------
-    # Main loop
+    # Persistent pipe reader
     # ------------------------------------------------------------------
 
-    def _run(self):
-        """Main background thread: read audio pipe, analyze, drive lights."""
-        while self._running:
+    def _persistent_pipe_reader(self):
+        """Always drain the audio pipe so librespot never blocks.
+
+        When the light show is active, audio data is analysed and used to
+        drive lights.  When inactive, data is simply discarded.  The thread
+        runs for the lifetime of the process.
+        """
+        while True:
             if not os.path.exists(PIPE_PATH):
-                logger.debug("Audio pipe not found, falling back to pattern mode")
-                self._run_pattern_only()
-                return
+                # No pipe yet — drive idle patterns if show is active
+                if self._running:
+                    self._drive_idle_pattern()
+                time.sleep(0.5)
+                continue
 
             fd = None
             try:
-                fd = os.open(PIPE_PATH, os.O_RDONLY | os.O_NONBLOCK)
-                logger.info("Opened audio pipe: %s", PIPE_PATH)
+                # Blocking open — waits until librespot opens the write end
+                fd = os.open(PIPE_PATH, os.O_RDONLY)
+                self._audio_connected = True
+                logger.info("Pipe reader: connected to %s", PIPE_PATH)
 
-                while self._running:
+                while True:
                     loop_start = time.time()
 
-                    try:
-                        raw = os.read(fd, CHUNK_BYTES)
-                    except OSError:
-                        # EAGAIN / EWOULDBLOCK — no data available yet
-                        raw = b""
+                    raw = os.read(fd, CHUNK_BYTES)
+                    if not raw:
+                        # Writer closed pipe (librespot restarted)
+                        break
 
-                    if len(raw) == CHUNK_BYTES:
+                    if self._running and len(raw) == CHUNK_BYTES:
                         samples = np.frombuffer(raw, dtype=np.int16)
-                        # Reshape to (N, 2) stereo and mix to mono
                         stereo = samples.reshape(-1, 2)
                         mono = stereo.mean(axis=1).astype(np.float64)
 
-                        # Apply latency compensation
                         if self.latency_ms > 0:
                             time.sleep(self.latency_ms / 1000.0)
 
                         self._analyze_and_drive(mono)
-                    else:
-                        # Incomplete read or no data — drive idle pattern
-                        self._drive_idle_pattern()
 
-                    # Maintain target loop rate
-                    elapsed = time.time() - loop_start
-                    sleep_time = LOOP_PERIOD - elapsed
-                    if sleep_time > 0:
-                        time.sleep(sleep_time)
+                        # Maintain 30 Hz analysis rate
+                        elapsed = time.time() - loop_start
+                        sleep_time = LOOP_PERIOD - elapsed
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
+                    elif self._running:
+                        # Incomplete chunk — drive idle pattern
+                        self._drive_idle_pattern()
+                        elapsed = time.time() - loop_start
+                        sleep_time = LOOP_PERIOD - elapsed
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
+                    # else: not running — data is discarded (drain fast)
 
             except OSError as exc:
-                logger.warning("Error opening audio pipe: %s", exc)
-                # Brief pause before retry or fallback
-                if self._running:
-                    time.sleep(1.0)
-                    continue
+                logger.debug("Pipe reader: %s, retrying...", exc)
             finally:
+                self._audio_connected = False
                 if fd is not None:
                     try:
                         os.close(fd)
                     except OSError:
                         pass
 
-        logger.debug("Light show thread exiting")
-
-    def _run_pattern_only(self):
-        """Timer-based patterns when no audio pipe is available."""
-        logger.info("Running in pattern-only mode (no audio pipe)")
-        while self._running:
-            loop_start = time.time()
-            self._drive_idle_pattern()
-            elapsed = time.time() - loop_start
-            sleep_time = LOOP_PERIOD - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            # Brief pause before reconnecting
+            time.sleep(1.0)
 
     # ------------------------------------------------------------------
     # Audio analysis

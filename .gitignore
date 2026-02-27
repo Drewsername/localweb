@@ -15,3 +15,7 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Build artifacts
+librespot-build/
+spotify_tokens.json
