@@ -60,6 +60,11 @@ class AudioBuffer:
 
     def get(self, timeout=2.0):
         with self._cond:
+            if timeout == 0.0:
+                # Non-blocking: return immediately if nothing available
+                if self._buf:
+                    return self._buf.popleft()
+                return None
             while not self._buf and not self._closed:
                 if not self._cond.wait(timeout):
                     return None
@@ -82,6 +87,7 @@ class AudioBuffer:
 
 
 class _StreamHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     audio_buffer = None
 
     def do_HEAD(self):
@@ -112,12 +118,24 @@ class _StreamHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
             while True:
-                chunk = self.audio_buffer.get(timeout=5.0)
+                # Collect available chunks into a batch to reduce
+                # syscall and TCP overhead (better for Sonos buffering).
+                batch = bytearray()
+                chunk = self.audio_buffer.get(timeout=0.5)
                 if chunk is None:
-                    # Send silence to keep connection alive
-                    self.wfile.write(b"\x00" * 4096)
+                    # No data yet — send a small silence block to keep
+                    # the TCP connection alive.
+                    batch.extend(b"\x00" * 4096)
                 else:
-                    self.wfile.write(chunk)
+                    batch.extend(chunk)
+                    # Drain up to 10 more queued chunks for this write
+                    for _ in range(10):
+                        extra = self.audio_buffer.get(timeout=0.0)
+                        if extra is None:
+                            break
+                        batch.extend(extra)
+
+                self.wfile.write(bytes(batch))
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
