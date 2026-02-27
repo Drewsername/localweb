@@ -83,13 +83,25 @@ class AudioBuffer:
 class _StreamHandler(BaseHTTPRequestHandler):
     audio_buffer = None
 
+    def do_HEAD(self):
+        """Sonos probes with HEAD before fetching the stream."""
+        if self.path not in ("/stream", "/stream.wav"):
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/x-wav")
+        self.send_header("Accept-Ranges", "none")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
     def do_GET(self):
-        if self.path != "/stream":
+        if self.path not in ("/stream", "/stream.wav"):
             self.send_error(404)
             return
 
         self.send_response(200)
-        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Content-Type", "audio/x-wav")
+        self.send_header("Accept-Ranges", "none")
         self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-cache, no-store")
         self.end_headers()
@@ -143,4 +155,4 @@ class AudioStreamer:
 
     @property
     def stream_url(self):
-        return f"http://10.0.0.74:{STREAM_PORT}/stream"
+        return f"http://10.0.0.74:{STREAM_PORT}/stream.wav"
