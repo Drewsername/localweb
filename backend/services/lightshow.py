@@ -253,6 +253,10 @@ class LightShowEngine:
                 self._audio_connected = True
                 self._sonos_started = False
                 self._chunks_since_connect = 0
+                # Flush stale audio from previous session so Sonos
+                # doesn't play leftover data from a prior track.
+                if self._streamer:
+                    self._streamer.buffer.clear()
                 logger.info("Pipe reader: connected to %s", PIPE_PATH)
 
                 last_analysis = 0.0
