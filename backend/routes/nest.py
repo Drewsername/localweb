@@ -126,20 +126,16 @@ def set_guardrails():
         for key in ("min_temp", "max_temp"):
             if key in data:
                 db.execute(
-                    """INSERT INTO user_settings (user_id, namespace, key, value, updated_at)
-                       VALUES (?, 'nest.admin', ?, ?, ?)
-                       ON CONFLICT(user_id, namespace, key)
-                       DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+                    """INSERT OR REPLACE INTO user_settings (user_id, namespace, key, value, updated_at)
+                       VALUES (?, 'nest.admin', ?, ?, ?)""",
                     (admin_id, key, json.dumps(data[key]), now),
                 )
 
         if "user_weights" in data:
             for uid_str, weight in data["user_weights"].items():
                 db.execute(
-                    """INSERT INTO user_settings (user_id, namespace, key, value, updated_at)
-                       VALUES (?, 'nest.admin', ?, ?, ?)
-                       ON CONFLICT(user_id, namespace, key)
-                       DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+                    """INSERT OR REPLACE INTO user_settings (user_id, namespace, key, value, updated_at)
+                       VALUES (?, 'nest.admin', ?, ?, ?)""",
                     (admin_id, f"user_weight.{uid_str}", json.dumps(weight), now),
                 )
 
@@ -157,10 +153,8 @@ def _save_nest_setting(user_id, device_id, data):
         for key in ("target_temp_f", "mode"):
             if key in data:
                 db.execute(
-                    """INSERT INTO user_settings (user_id, namespace, key, value, updated_at)
-                       VALUES (?, ?, ?, ?, ?)
-                       ON CONFLICT(user_id, namespace, key)
-                       DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+                    """INSERT OR REPLACE INTO user_settings (user_id, namespace, key, value, updated_at)
+                       VALUES (?, ?, ?, ?, ?)""",
                     (user_id, namespace, key, json.dumps(data[key]), now),
                 )
         db.commit()

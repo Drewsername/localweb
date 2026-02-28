@@ -83,10 +83,8 @@ def _save_govee_setting(user_id, device_id, capability):
     db = get_db()
     try:
         db.execute(
-            """INSERT INTO user_settings (user_id, namespace, key, value, updated_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(user_id, namespace, key)
-               DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            """INSERT OR REPLACE INTO user_settings (user_id, namespace, key, value, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
             (user_id, namespace, key, json.dumps(value), now),
         )
         db.commit()

@@ -59,10 +59,8 @@ def update_settings(namespace):
     try:
         for key, value in data.items():
             db.execute(
-                """INSERT INTO user_settings (user_id, namespace, key, value, updated_at)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(user_id, namespace, key)
-                   DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+                """INSERT OR REPLACE INTO user_settings (user_id, namespace, key, value, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
                 (user_id, namespace, key, json.dumps(value), now),
             )
         db.commit()
