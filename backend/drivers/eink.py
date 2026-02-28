@@ -83,37 +83,44 @@ def _new_image():
 # Render functions
 # ---------------------------------------------------------------------------
 
-def render_welcome(name):
-    """Welcome screen: 'Welcome to Drewtopia, [Name]!' auto-sized to fill display."""
+def render_welcome(names):
+    """Welcome screen: 'Welcome home, [Names]!' auto-sized to fill display.
+
+    names can be a string (single name) or a list of strings.
+    """
     img, draw = _new_image()
     usable_w = DISPLAY_WIDTH - PADDING * 2
 
-    # Line 1: "Welcome to"
-    line1 = "Welcome to"
-    f1, s1 = _fit_font_bold(line1, usable_w, max_size=40)
+    # Normalize to list
+    if isinstance(names, str):
+        names = [names]
+
+    # Format names string: "Drew!", "Drew and Annabelle!", "Drew, Annabelle, and Steve!"
+    if len(names) == 1:
+        names_str = names[0] + "!"
+    elif len(names) == 2:
+        names_str = f"{names[0]} and {names[1]}!"
+    else:
+        names_str = ", ".join(names[:-1]) + ", and " + names[-1] + "!"
+
+    # Line 1: "Welcome home"
+    line1 = "Welcome home"
+    f1, s1 = _fit_font_bold(line1, usable_w, max_size=44)
     w1, h1 = _text_size(f1, line1)
 
-    # Line 2: "Drewtopia,"
-    line2 = "Drewtopia,"
-    f2, s2 = _fit_font_bold(line2, usable_w, max_size=56)
-    w2, h2 = _text_size(f2, line2)
-
-    # Line 3: Name!
-    line3 = name + "!"
-    f3, s3 = _fit_font_bold(line3, usable_w, max_size=56)
-    w3, h3 = _text_size(f3, line3)
+    # Line 2: Names
+    f2, s2 = _fit_font_bold(names_str, usable_w, max_size=56)
+    w2, h2 = _text_size(f2, names_str)
 
     # Vertical layout — center the block
-    spacing = 10
-    total_h = h1 + spacing + h2 + spacing + h3
+    spacing = 12
+    total_h = h1 + spacing + h2
     y_start = (DISPLAY_HEIGHT - total_h) // 2
 
     y = y_start
     draw.text((_center_x(w1), y), line1, BLACK, f1)
     y += h1 + spacing
-    draw.text((_center_x(w2), y), line2, RED, f2)
-    y += h2 + spacing
-    draw.text((_center_x(w3), y), line3, RED, f3)
+    draw.text((_center_x(w2), y), names_str, RED, f2)
 
     return img
 

@@ -35,7 +35,7 @@ export default function Home() {
     <div className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-lg mx-auto space-y-8">
         <div>
-          <h1 className="text-3xl font-bold">Welcome, {user?.name}!</h1>
+          <h1 className="text-3xl font-bold">Welcome home, {user?.name}!</h1>
           <p className="text-gray-400 mt-1">What would you like to control?</p>
         </div>
         <div className="grid gap-4">
