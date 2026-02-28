@@ -4,6 +4,7 @@ import platform
 import threading
 import time
 import json
+import traceback
 from datetime import datetime, timezone, timedelta
 from db import get_db
 
@@ -90,6 +91,7 @@ class PresenceScanner:
                 self._scan()
             except Exception as e:
                 print(f"Presence scan error: {e}")
+                traceback.print_exc()
             time.sleep(SCAN_INTERVAL)
 
     def _get_current_ipv4_for_macs(self):
