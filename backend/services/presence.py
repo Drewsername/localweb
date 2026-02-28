@@ -92,6 +92,31 @@ class PresenceScanner:
                 print(f"Presence scan error: {e}")
             time.sleep(SCAN_INTERVAL)
 
+    def _get_current_ipv4_for_macs(self):
+        """Look up current IPv4 addresses from the ARP/NDP table by MAC.
+
+        Stored IPs go stale (especially IPv6 with privacy extensions),
+        so we find the actual current IPv4 for each MAC from `ip neigh`.
+        """
+        mac_to_ip = {}
+        try:
+            output = subprocess.check_output(["ip", "neigh"], text=True)
+            for line in output.splitlines():
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                ip = parts[0]
+                if ":" in ip:
+                    continue  # skip IPv6 — only want IPv4 for reliable ping
+                mac_match = re.search(
+                    r"([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", line
+                )
+                if mac_match:
+                    mac_to_ip[mac_match.group(0).lower()] = ip
+        except Exception:
+            pass
+        return mac_to_ip
+
     def _ping_users(self, users):
         """Ping all known user IPs to force ARP table refresh.
 
@@ -100,8 +125,13 @@ class PresenceScanner:
         which we then filter out.
         """
         is_windows = platform.system() == "Windows"
+        # On Linux, prefer current IPv4 from ARP table over stored IP
+        # (stored IPs go stale, especially IPv6 with privacy extensions)
+        mac_to_ipv4 = {} if is_windows else self._get_current_ipv4_for_macs()
+
         for user in users:
-            ip = user["ip_address"]
+            mac = user["mac_address"]
+            ip = mac_to_ipv4.get(mac) or user["ip_address"]
             if not ip:
                 continue
             try:
