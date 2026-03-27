@@ -1,2 +1,5 @@
 # localweb auto-deploy: check for updates every 5 minutes
 */5 * * * * /home/pi/localweb/deploy/update.sh
+
+# Fix mDNS: ensure drew.local doesn't drift to drew-2.local
+* * * * * /home/pi/localweb/deploy/fix-mdns.sh
